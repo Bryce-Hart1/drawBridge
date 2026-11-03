@@ -8,16 +8,27 @@ license.workspace = true
 # 11/03/2026: request and response bodies. Already a dependency of reqwest, so
 # nothing new is built; named here because `Bytes` is in this crate's public API.
 bytes = "1"
+# 11/03/2026: `FuturesUnordered` and `buffered` for keeping several chunk
+# transfers in flight with bounded memory. Already in the tree under reqwest.
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 # 11/03/2026: the swiftSearch client. Same version and feature set as
 # agil_backend. Default features are off, which also drops HTTP/2: swiftSearch
 # speaks HTTP/1.0 and 1.1 only (anything else is a 505).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# 11/03/2026: local state (the upload queue now, the index from M2). `bundled`
+# compiles SQLite in, so the app doesn't depend on the system's copy.
+rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
-tokio = { version = "1.52.3", features = ["time"] }
+# 11/03/2026: per-chunk and whole-file hashes in blob manifests. The same crate
+# and version as agil_backend.
+sha2 = "0.10"
+tokio = { version = "1.52.3", features = ["fs", "io-util", "rt", "time"] }
+# 11/03/2026: blob ids. v7 ids start with a timestamp, so they sort by age.
+uuid = { version = "1.23.3", features = ["v7"] }
 
 [dev-dependencies]
 # 11/03/2026: test-only. The integration harness starts a real swiftSearch in a
-# throwaway store folder.
+# throwaway store folder; blob tests write their files there too.
 tempfile = "3"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "time"] }

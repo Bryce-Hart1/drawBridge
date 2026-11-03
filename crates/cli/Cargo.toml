@@ -1,0 +1,17 @@
+[package]
+name = "drawbridge-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dbx"
+path = "src/main.rs"
+
+[dependencies]
+# 11/03/2026: argument parsing for a dev tool that grows a subcommand per
+# milestone. The CLI isn't shipped inside the app, so its size doesn't count
+# against the app's.
+clap = { version = "4.6", features = ["derive", "env"] }
+drawbridge-core = { path = "../core" }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "signal"] }

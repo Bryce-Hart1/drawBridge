@@ -24,13 +24,14 @@ use std::time::Duration;
 use bytes::Bytes;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::{Method, RequestBuilder, Response, StatusCode, Url};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::keys::Key;
 
 /// What kind of value a blob holds. Sent as `X-SwiftSearch-Type` on every PUT,
 /// so the store stays self-describing to anyone reading it with curl.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Kind {
     Img,
     Video,

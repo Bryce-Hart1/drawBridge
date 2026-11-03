@@ -14,6 +14,7 @@
 //   dbx/v1/dev/<device>/log/<seq>.json  an immutable batch of ops
 //   dbx/v1/dev/<device>/ckpt/<n>.json   a snapshot of the whole index
 //   dbx/v1/obj/<blob>/<i>             content chunk i, immutable
+//   dbx/v1/obj/<blob>/manifest.json   size, chunk hashes, type; written last
 //   dbx/v1/obj/<blob>/thumb           thumbnail or video poster
 
 use std::fmt;
@@ -117,6 +118,10 @@ pub fn chunk(blob: &str, index: u32) -> Result<Key, KeyError> {
     Ok(Key(format!("{ROOT}/obj/{}/{index}", id("blob", blob)?)))
 }
 
+pub fn manifest(blob: &str) -> Result<Key, KeyError> {
+    Ok(Key(format!("{ROOT}/obj/{}/manifest.json", id("blob", blob)?)))
+}
+
 pub fn thumb(blob: &str) -> Result<Key, KeyError> {
     Ok(Key(format!("{ROOT}/obj/{}/thumb", id("blob", blob)?)))
 }
@@ -153,6 +158,7 @@ mod tests {
         assert_eq!(log(UUID, 42).unwrap().as_str(), format!("dbx/v1/dev/{UUID}/log/42.json"));
         assert_eq!(checkpoint(UUID, 3).unwrap().as_str(), format!("dbx/v1/dev/{UUID}/ckpt/3.json"));
         assert_eq!(chunk(UUID, 0).unwrap().as_str(), format!("dbx/v1/obj/{UUID}/0"));
+        assert_eq!(manifest(UUID).unwrap().as_str(), format!("dbx/v1/obj/{UUID}/manifest.json"));
         assert_eq!(thumb(UUID).unwrap().as_str(), format!("dbx/v1/obj/{UUID}/thumb"));
     }
 

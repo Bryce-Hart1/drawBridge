@@ -6,7 +6,8 @@ mod common;
 
 use bytes::Bytes;
 use common::{Server, bytes};
-use drawbridge_core::{ByteRange, Conditional, Error, Key, Kind, Remote};
+use drawbridge_core::remote::Error;
+use drawbridge_core::{ByteRange, Conditional, Key, Kind, Remote};
 
 fn key(s: &str) -> Key {
     Key::new(s).unwrap()
