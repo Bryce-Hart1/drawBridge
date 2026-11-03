@@ -9,18 +9,18 @@
 // and let a seek fetch one chunk's worth instead of one file's worth.
 //
 // Write order is what makes a blob safe to read: every chunk, then the
-// manifest. A manifest exists only once all of its chunks are on disk in the
-// store, and nothing (from M2, the op log) points at a blob before its
-// manifest. Uploads are resumable at chunk granularity: each chunk swiftSearch
-// acknowledges is recorded in the local Db, and a later upload of the same
-// unchanged file skips those chunks.
+// manifest, then the op that puts it in the index. A manifest exists only once
+// all of its chunks are on disk in the store, and no op points at a blob
+// before its manifest. Uploads are resumable at chunk granularity: each chunk
+// swiftSearch acknowledges is recorded in the local Db, and a later upload of
+// the same unchanged file skips those chunks.
 
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use bytes::{Bytes, BytesMut};
 use futures_util::stream::{self, FuturesUnordered, StreamExt};
@@ -28,8 +28,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
-use crate::db::{Db, PendingUpload};
+use crate::db::{self, Db, PendingUpload};
 use crate::error::Error;
+use crate::index;
 use crate::keys;
 use crate::mime;
 use crate::remote::{self, ByteRange, Kind, Remote};
@@ -150,6 +151,18 @@ pub fn resolve(range: ByteRange, size: u64) -> Option<(u64, u64)> {
     }
 }
 
+/// Where a finished upload goes in the index.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "to", rename_all = "lowercase")]
+pub enum Dest {
+    /// Nowhere: just the blob, which nothing in the index points at.
+    Blob,
+    /// A new file with this name in this folder (`None` is the root).
+    New { parent: Option<String>, name: String },
+    /// New content for the file with this entry id.
+    Replace { id: String },
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct UploadOptions {
     /// Bytes per chunk, at most 64 MiB. Ignored when resuming: a resumed
@@ -176,15 +189,20 @@ pub struct Progress {
 #[derive(Clone, Debug)]
 pub struct Uploaded {
     pub manifest: Manifest,
+    /// The file's entry id, unless the upload was for the blob alone.
+    pub entry: Option<String>,
     /// Chunks sent in this call.
     pub sent: u32,
     /// Chunks an earlier, interrupted call had already sent.
     pub skipped: u32,
 }
 
-/// Upload the file at `path` as a new blob, or carry on with an unfinished
-/// upload of the same file. If the file has changed since that upload started,
-/// the old partial upload is deleted and this starts over.
+/// Upload the file at `path` as a new blob and put it at `dest` in the index,
+/// or carry on with an unfinished upload of the same file. If the file has
+/// changed since that upload started, the old partial upload is deleted and
+/// this starts over.
+///
+/// The index changes on this device only; the next sync pushes it.
 ///
 /// Setting `stop` makes it finish the chunks in flight and return
 /// `Error::Stopped`; calling this again picks up from there.
@@ -192,37 +210,45 @@ pub async fn upload(
     remote: &Remote,
     db: &Db,
     path: &Path,
+    dest: Dest,
     opts: UploadOptions,
     progress: &(dyn Fn(Progress) + Sync),
     stop: &AtomicBool,
 ) -> Result<Uploaded, Error> {
     if opts.chunk_size == 0 || opts.chunk_size > MAX_CHUNK_SIZE {
-        return Err(invalid(format!("chunk size {} is outside 1..=64 MiB", opts.chunk_size)));
+        return Err(Error::Invalid(format!("chunk size {} is outside 1..=64 MiB", opts.chunk_size)));
     }
+    index::check_dest(db, &dest)?;
     // Canonical, so the same file resumes whatever directory it's named from.
     let path = std::fs::canonicalize(path)?;
     let (size, mtime_ns) = stat(&path)?;
     if chunk_count(size, opts.chunk_size).is_none() {
-        return Err(invalid(format!("{} is too large", path.display())));
+        return Err(Error::Invalid(format!("{} is too large", path.display())));
     }
 
     let job = match db.pending_for_path(&path)? {
-        Some(p) if p.size == size && p.mtime_ns == mtime_ns => p,
+        Some(p) if p.size == size && p.mtime_ns == mtime_ns => {
+            if p.dest != dest {
+                db.set_upload_dest(&p.blob, &dest)?;
+            }
+            PendingUpload { dest, ..p }
+        }
         stale => {
             if let Some(p) = stale {
                 discard(remote, db, &p).await?;
             }
             let (mime, kind) = mime::detect(&path);
             let p = PendingUpload {
-                blob: uuid::Uuid::now_v7().to_string(),
+                blob: db::new_id(),
                 path,
                 size,
                 mtime_ns,
                 chunk_size: opts.chunk_size,
                 mime: mime.to_owned(),
                 kind,
-                started_ms: now_ms(),
+                started_ms: db::now_ms() as i64,
                 chunks_done: 0,
+                dest,
             };
             db.start_upload(&p)?;
             p
@@ -232,8 +258,8 @@ pub async fn upload(
 }
 
 /// Carry on with an unfinished upload by its blob id, e.g. every pending upload
-/// when the app starts. A file that has changed since is `SourceChanged`, and
-/// its partial upload is deleted.
+/// when the app starts. It goes where it was headed when it started. A file
+/// that has changed since is `SourceChanged`, and its partial upload is deleted.
 pub async fn resume(
     remote: &Remote,
     db: &Db,
@@ -364,8 +390,8 @@ async fn run(
     };
     let json = serde_json::to_vec(&manifest).expect("a manifest always serializes");
     remote.put(&keys::manifest(&job.blob)?, Kind::Str, Bytes::from(json)).await?;
-    db.drop_upload(&job.blob)?;
-    Ok(Uploaded { manifest, sent: tally.sent, skipped: tally.skipped })
+    let entry = db.finish_upload(&job, &manifest)?;
+    Ok(Uploaded { manifest, entry, sent: tally.sent, skipped: tally.skipped })
 }
 
 struct Tally<'a> {
@@ -442,6 +468,30 @@ async fn discard(remote: &Remote, db: &Db, job: &PendingUpload) -> Result<(), Er
         deleted?;
     }
     db.drop_upload(&job.blob)
+}
+
+/// Delete a finished blob from the store: its chunks, its thumbnail, and the
+/// manifest last, so a blob whose manifest is gone has nothing else left. A
+/// blob already gone is fine. Garbage collection calls this; nothing must
+/// point at the blob any more.
+pub async fn delete(remote: &Remote, blob: &str) -> Result<(), Error> {
+    let chunks = match manifest(remote, blob).await {
+        Ok(m) => m.chunks.len() as u32,
+        Err(Error::NotFound(_)) => return Ok(()),
+        // Unreadable, so how many chunks it had is unknown. Any stay behind;
+        // the manifest and thumbnail still go, so this isn't retried forever.
+        Err(Error::Corrupt(_)) => 0,
+        Err(e) => return Err(e),
+    };
+    let mut deletes = stream::iter(0..chunks)
+        .map(|index| async move { remote.delete(&keys::chunk(blob, index)?).await.map_err(Error::from) })
+        .buffer_unordered(8);
+    while let Some(deleted) = deletes.next().await {
+        deleted?;
+    }
+    remote.delete(&keys::thumb(blob)?).await?;
+    remote.delete(&keys::manifest(blob)?).await?;
+    Ok(())
 }
 
 /// Read a blob's manifest.
@@ -583,21 +633,13 @@ async fn write_chunks(
 fn stat(path: &Path) -> Result<(u64, i64), Error> {
     let md = std::fs::metadata(path)?;
     if !md.is_file() {
-        return Err(invalid(format!("{} is not a regular file", path.display())));
+        return Err(Error::Invalid(format!("{} is not a regular file", path.display())));
     }
     let mtime_ns = md
         .modified()?
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX));
     Ok((md.len(), mtime_ns))
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
-}
-
-fn invalid(why: String) -> Error {
-    Error::Io(io::Error::new(io::ErrorKind::InvalidInput, why))
 }
 
 pub(crate) fn hex(bytes: &[u8]) -> String {
@@ -710,7 +752,8 @@ mod tests {
     fn futures_are_send(remote: &Remote, db: &Db, m: &Manifest, stop: &AtomicBool) {
         fn send<T: Send>(_: T) {}
         let progress = |_: Progress| {};
-        send(upload(remote, db, Path::new("x"), UploadOptions::default(), &progress, stop));
+        send(upload(remote, db, Path::new("x"), Dest::Blob, UploadOptions::default(), &progress, stop));
+        send(delete(remote, "b"));
         send(resume(remote, db, "b", 3, &progress, stop));
         send(cancel(remote, db, "b"));
         send(download(remote, m, Path::new("x"), 4, &progress, stop));

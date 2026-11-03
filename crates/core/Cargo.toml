@@ -28,6 +28,9 @@ tokio = { version = "1.52.3", features = ["fs", "io-util", "rt", "time"] }
 uuid = { version = "1.23.3", features = ["v7"] }
 
 [dev-dependencies]
+# 11/03/2026: test-only. The op-log merge must give the same state for any
+# order of the same ops; random op sets in shuffled orders check that.
+proptest = "1.12"
 # 11/03/2026: test-only. The integration harness starts a real swiftSearch in a
 # throwaway store folder; blob tests write their files there too.
 tempfile = "3"

@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use bytes::Bytes;
 use common::{Server, bytes};
 use drawbridge_core::blob::{self, UploadOptions};
-use drawbridge_core::{ByteRange, Db, Error, Kind, Progress, keys};
+use drawbridge_core::{ByteRange, Db, Dest, Error, Kind, Progress, keys};
 use sha2::{Digest, Sha256};
 
 const SMALL: u32 = 64 * 1024;
@@ -51,7 +51,7 @@ async fn round_trips_at_chunk_edges() {
     for (i, len) in sizes.into_iter().enumerate() {
         let data = bytes(len, i as u64 + 1);
         let src = write(dir.path(), &format!("in{i}.jpg"), &data);
-        let up = blob::upload(&r, &db, &src, opts(SMALL, 3), &quiet, &go).await.unwrap();
+        let up = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 3), &quiet, &go).await.unwrap();
         let m = &up.manifest;
         assert_eq!(m.size, len as u64);
         assert_eq!(m.chunks.len(), len.div_ceil(SMALL as usize));
@@ -79,7 +79,7 @@ async fn default_chunk_size_on_a_large_file() {
 
     let reports = std::sync::Mutex::new(Vec::new());
     let record = |p: Progress| reports.lock().unwrap().push(p);
-    let up = blob::upload(&r, &db, &src, UploadOptions::default(), &record, &go).await.unwrap();
+    let up = blob::upload(&r, &db, &src, Dest::Blob, UploadOptions::default(), &record, &go).await.unwrap();
     assert_eq!(up.manifest.chunk_size, 8 << 20);
     assert_eq!(up.manifest.chunks.len(), 3);
     let reports = reports.into_inner().unwrap();
@@ -101,7 +101,7 @@ async fn ranges_cross_chunks() {
     let go = AtomicBool::new(false);
     let data = bytes(200_000, 4);
     let src = write(dir.path(), "song.mp3", &data);
-    let m = blob::upload(&r, &db, &src, opts(SMALL, 3), &quiet, &go).await.unwrap().manifest;
+    let m = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 3), &quiet, &go).await.unwrap().manifest;
 
     let cs = SMALL as u64;
     for (range, first, last) in [
@@ -131,7 +131,7 @@ async fn stops_and_resumes_where_it_left_off() {
     let src = write(dir.path(), "movie.mov", &data);
 
     let stop = AtomicBool::new(false);
-    let first = blob::upload(&r, &db, &src, opts(SMALL, 1), &stop_after(&stop, 3 * SMALL as u64), &stop).await;
+    let first = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 1), &stop_after(&stop, 3 * SMALL as u64), &stop).await;
     assert!(matches!(first, Err(Error::Stopped)), "{first:?}");
 
     let pending = db.pending_uploads().unwrap();
@@ -143,7 +143,7 @@ async fn stops_and_resumes_where_it_left_off() {
     // The same file again picks the upload back up, whatever path names it.
     let go = AtomicBool::new(false);
     let via = dir.path().join(".").join("movie.mov");
-    let up = blob::upload(&r, &db, &via, opts(SMALL, 3), &quiet, &go).await.unwrap();
+    let up = blob::upload(&r, &db, &via, Dest::Blob, opts(SMALL, 3), &quiet, &go).await.unwrap();
     assert_eq!(up.manifest.blob, id);
     assert_eq!((up.skipped, up.sent), (done, 10 - done));
     assert!(db.pending_uploads().unwrap().is_empty());
@@ -160,7 +160,7 @@ async fn resumes_by_blob_id() {
     let data = bytes(6 * SMALL as usize, 6);
     let src = write(dir.path(), "a.bin", &data);
     let stop = AtomicBool::new(false);
-    let _ = blob::upload(&r, &db, &src, opts(SMALL, 1), &stop_after(&stop, 2 * SMALL as u64), &stop).await;
+    let _ = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 1), &stop_after(&stop, 2 * SMALL as u64), &stop).await;
     let id = db.pending_uploads().unwrap()[0].blob.clone();
 
     let go = AtomicBool::new(false);
@@ -176,13 +176,13 @@ async fn a_changed_file_starts_over() {
     let (r, db, dir) = (s.writer(), Db::open_in_memory().unwrap(), tempfile::tempdir().unwrap());
     let src = write(dir.path(), "notes.md", &bytes(8 * SMALL as usize, 7));
     let stop = AtomicBool::new(false);
-    let _ = blob::upload(&r, &db, &src, opts(SMALL, 1), &stop_after(&stop, 2 * SMALL as u64), &stop).await;
+    let _ = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 1), &stop_after(&stop, 2 * SMALL as u64), &stop).await;
     let old = db.pending_uploads().unwrap()[0].blob.clone();
 
     let data = bytes(8 * SMALL as usize + 1, 8);
     std::fs::write(&src, &data).unwrap();
     let go = AtomicBool::new(false);
-    let up = blob::upload(&r, &db, &src, opts(SMALL, 3), &quiet, &go).await.unwrap();
+    let up = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 3), &quiet, &go).await.unwrap();
     assert_ne!(up.manifest.blob, old);
     assert_eq!(up.skipped, 0);
     assert_eq!(up.manifest.sha256, sha_hex(&data));
@@ -192,7 +192,7 @@ async fn a_changed_file_starts_over() {
 
     // Changed between stopping and an explicit resume: refused, and cleaned up.
     let stop = AtomicBool::new(false);
-    let _ = blob::upload(&r, &db, &src, opts(SMALL, 1), &stop_after(&stop, 1), &stop).await;
+    let _ = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 1), &stop_after(&stop, 1), &stop).await;
     let mid = db.pending_uploads().unwrap()[0].blob.clone();
     std::fs::write(&src, b"short now").unwrap();
     assert!(matches!(blob::resume(&r, &db, &mid, 3, &quiet, &go).await, Err(Error::SourceChanged(_))));
@@ -206,7 +206,7 @@ async fn cancel_deletes_what_was_sent() {
     let (r, db, dir) = (s.writer(), Db::open_in_memory().unwrap(), tempfile::tempdir().unwrap());
     let src = write(dir.path(), "x.bin", &bytes(10 * SMALL as usize, 9));
     let stop = AtomicBool::new(false);
-    let _ = blob::upload(&r, &db, &src, opts(SMALL, 2), &stop_after(&stop, 3 * SMALL as u64), &stop).await;
+    let _ = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 2), &stop_after(&stop, 3 * SMALL as u64), &stop).await;
     let id = db.pending_uploads().unwrap()[0].blob.clone();
 
     blob::cancel(&r, &db, &id).await.unwrap();
@@ -223,7 +223,7 @@ async fn damage_in_the_store_is_caught() {
     let (r, db, dir) = (s.writer(), Db::open_in_memory().unwrap(), tempfile::tempdir().unwrap());
     let go = AtomicBool::new(false);
     let src = write(dir.path(), "p.png", &bytes(3 * SMALL as usize, 10));
-    let m = blob::upload(&r, &db, &src, opts(SMALL, 3), &quiet, &go).await.unwrap().manifest;
+    let m = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 3), &quiet, &go).await.unwrap().manifest;
 
     // Same length, different bytes: only the sha256 can tell.
     let k1 = keys::chunk(&m.blob, 1).unwrap();

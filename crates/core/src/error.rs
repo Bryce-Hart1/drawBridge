@@ -29,6 +29,12 @@ pub enum Error {
     /// The caller asked the transfer to stop. An upload keeps its progress and
     /// resumes from where it stopped.
     Stopped,
+    /// A request that can't be carried out as asked: a bad name, a move into
+    /// a file, an option out of range. The message says what to change.
+    Invalid(String),
+    /// The index needs a device id (every op is stamped with one), and this
+    /// local state doesn't have one yet. `Db::init_device` makes one.
+    NoDevice,
 }
 
 impl fmt::Display for Error {
@@ -45,6 +51,8 @@ impl fmt::Display for Error {
                 write!(f, "{} changed while it was being uploaded", path.display())
             }
             Error::Stopped => f.write_str("stopped"),
+            Error::Invalid(why) => f.write_str(why),
+            Error::NoDevice => f.write_str("this device isn't set up yet: it has no device id"),
         }
     }
 }
