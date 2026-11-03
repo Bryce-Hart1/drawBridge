@@ -1,0 +1,23 @@
+[package]
+name = "drawbridge-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# 11/03/2026: request and response bodies. Already a dependency of reqwest, so
+# nothing new is built; named here because `Bytes` is in this crate's public API.
+bytes = "1"
+# 11/03/2026: the swiftSearch client. Same version and feature set as
+# agil_backend. Default features are off, which also drops HTTP/2: swiftSearch
+# speaks HTTP/1.0 and 1.1 only (anything else is a 505).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tokio = { version = "1.52.3", features = ["time"] }
+
+[dev-dependencies]
+# 11/03/2026: test-only. The integration harness starts a real swiftSearch in a
+# throwaway store folder.
+tempfile = "3"
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "time"] }

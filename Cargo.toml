@@ -1,0 +1,21 @@
+# Claude — Date 11/03/2026
+# drawBridge workspace. `crates/core` is the client library every front end
+# shares (the Tauri app, the `dbx` CLI, later the Swift app via UniFFI); it has
+# no UI or Tauri dependencies of its own.
+[workspace]
+resolver = "3"
+members = ["crates/core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+# The app is meant to be a small, quiet process: size-optimised, one codegen
+# unit, no unwinding tables.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
