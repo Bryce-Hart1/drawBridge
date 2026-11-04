@@ -11,6 +11,10 @@ bytes = "1"
 # 11/03/2026: `FuturesUnordered` and `buffered` for keeping several chunk
 # transfers in flight with bounded memory. Already in the tree under reqwest.
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+# 11/03/2026: photo thumbnails, made from the local file at upload. Only the
+# four codecs drawBridge makes thumbnails of; defaults (rayon, a dozen formats)
+# off.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 # 11/03/2026: the swiftSearch client. Same version and feature set as
 # agil_backend. Default features are off, which also drops HTTP/2: swiftSearch
 # speaks HTTP/1.0 and 1.1 only (anything else is a 505).

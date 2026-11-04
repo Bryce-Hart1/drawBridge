@@ -253,3 +253,27 @@ async fn unknown_blob() {
     let got = blob::manifest(&s.writer(), "0192f0a4-7c1e-7b3a-9f00-5d2c8e1a4b6f").await;
     assert!(matches!(got, Err(Error::NotFound(_))));
 }
+
+#[tokio::test]
+async fn photos_get_a_thumbnail() {
+    let s = Server::start();
+    let (r, db, dir) = (s.writer(), Db::open_in_memory().unwrap(), tempfile::tempdir().unwrap());
+    let go = AtomicBool::new(false);
+    let src = dir.path().join("photo.png");
+    image::RgbImage::from_pixel(600, 400, image::Rgb([90, 140, 200])).save(&src).unwrap();
+    let photo = blob::upload(&r, &db, &src, Dest::Blob, opts(SMALL, 3), &quiet, &go).await.unwrap().manifest.blob;
+
+    let thumb = r.get(&keys::thumb(&photo).unwrap()).await.unwrap().expect("a photo has a thumbnail");
+    let small = image::load_from_memory(&thumb.bytes).unwrap();
+    assert_eq!(small.width(), 256);
+    assert!((170..=171).contains(&small.height()), "{}", small.height());
+
+    // Anything else has none.
+    let text = write(dir.path(), "notes.txt", b"hello");
+    let text = blob::upload(&r, &db, &text, Dest::Blob, opts(SMALL, 3), &quiet, &go).await.unwrap().manifest.blob;
+    assert!(r.get(&keys::thumb(&text).unwrap()).await.unwrap().is_none());
+
+    // Deleting the blob takes its thumbnail with it.
+    blob::delete(&r, &photo).await.unwrap();
+    assert!(r.get(&keys::thumb(&photo).unwrap()).await.unwrap().is_none());
+}

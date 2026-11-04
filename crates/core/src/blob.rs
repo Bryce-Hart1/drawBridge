@@ -8,8 +8,8 @@
 // chunks keep large videos storable, bound swiftSearch's memory per request,
 // and let a seek fetch one chunk's worth instead of one file's worth.
 //
-// Write order is what makes a blob safe to read: every chunk, then the
-// manifest, then the op that puts it in the index. A manifest exists only once
+// Write order is what makes a blob safe to read: every chunk, its thumbnail
+// for a photo, then the manifest, then the op that puts it in the index. A manifest exists only once
 // all of its chunks are on disk in the store, and no op points at a blob
 // before its manifest. Uploads are resumable at chunk granularity: each chunk
 // swiftSearch acknowledges is recorded in the local Db, and a later upload of
@@ -34,6 +34,7 @@ use crate::index;
 use crate::keys;
 use crate::mime;
 use crate::remote::{self, ByteRange, Kind, Remote};
+use crate::thumb;
 
 /// The default chunk size. Each manifest records its own, so this can change
 /// without touching blobs already stored.
@@ -375,6 +376,16 @@ async fn run(
         }
         Some(e) => return Err(e),
         None => {}
+    }
+
+    // Before the manifest: once a reader can see the blob, its thumbnail is
+    // already there or never will be.
+    if kind == Kind::Img {
+        let (path, mime) = (job.path.clone(), job.mime.clone());
+        let made = tokio::task::spawn_blocking(move || thumb::make(&path, &mime)).await;
+        if let Ok(Some(jpeg)) = made {
+            remote.put(&keys::thumb(&job.blob)?, Kind::Img, Bytes::from(jpeg)).await?;
+        }
     }
 
     let manifest = Manifest {

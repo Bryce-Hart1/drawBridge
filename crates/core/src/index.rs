@@ -46,6 +46,64 @@ pub fn remove(db: &Db, id: &str) -> Result<usize, Error> {
     Ok(ids.len())
 }
 
+/// One search result: an entry and the folder it's shown in (`None` is the root).
+pub struct Hit<'v> {
+    pub entry: &'v Entry,
+    pub parent: Option<&'v str>,
+}
+
+/// Entries whose name contains `query`, ignoring case, best first: names that
+/// start with it, then names with a word that does (`2026 beach.jpg` for
+/// `beach`), then any others; shorter paths first within each. A query with a
+/// `/` in it matches whole paths instead (`trips/lis`). Reads only this
+/// device's copy of the index, so it is instant and works offline.
+pub fn search<'v>(view: &'v View, query: &str, limit: usize) -> Vec<Hit<'v>> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let mut found: Vec<(u8, String, &Entry)> = view
+        .entries()
+        .filter_map(|e| {
+            let rank = if q.contains('/') {
+                let path = view.path(&e.id)?.to_lowercase();
+                if !path.contains(&q) {
+                    return None;
+                }
+                0
+            } else {
+                let name = e.name().to_lowercase();
+                if name.starts_with(&q) {
+                    0
+                } else if name.match_indices(&q).any(|(i, _)| !name[..i].ends_with(char::is_alphanumeric)) {
+                    1
+                } else if name.contains(&q) {
+                    2
+                } else {
+                    return None;
+                }
+            };
+            Some((rank, view.path(&e.id)?, e))
+        })
+        .collect();
+    found.sort_by(|a, b| (a.0, a.1.len(), &a.1).cmp(&(b.0, b.1.len(), &b.1)));
+    found.truncate(limit);
+    found.into_iter().map(|(_, _, entry)| Hit { entry, parent: view.parent_of(&entry.id) }).collect()
+}
+
+/// `name`, or the first of `name (2)`, `name (3)`, … that `taken` says is free,
+/// with the number before the extension as Finder puts it: `beach (2).jpg`.
+pub fn free_name(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(name) {
+        return name.to_owned();
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(dot) if dot > 0 => name.split_at(dot),
+        _ => (name, ""),
+    };
+    (2..).map(|n| format!("{stem} ({n}){ext}")).find(|n| !taken(n)).expect("some number is free")
+}
+
 /// Check an upload's destination before any bytes are sent.
 pub(crate) fn check_dest(db: &Db, dest: &Dest) -> Result<(), Error> {
     if *dest == Dest::Blob {
@@ -185,6 +243,43 @@ mod tests {
         assert_eq!(view.len(), 1);
         assert!(view.get(&keep).is_some());
         assert!(matches!(remove(&db, &a), Err(Error::NotFound(_))));
+    }
+
+    #[test]
+    fn search_ranks_and_finds_by_path() {
+        let db = device();
+        let photos = mkdir(&db, None, "Photos").unwrap();
+        let trips = mkdir(&db, Some(&photos), "trips").unwrap();
+        let deep = mkdir(&db, Some(&trips), "beach").unwrap();
+        mkdir(&db, None, "Beach day").unwrap();
+        mkdir(&db, None, "old beach").unwrap();
+        mkdir(&db, None, "seabeach").unwrap();
+        mkdir(&db, None, "harbor").unwrap();
+        let view = db.view().unwrap();
+        let names = |q: &str| -> Vec<String> {
+            search(&view, q, 10).iter().map(|h| view.path(&h.entry.id).unwrap()).collect()
+        };
+        assert_eq!(
+            names("BEACH"),
+            ["/Beach day", "/Photos/trips/beach", "/old beach", "/seabeach"],
+            "prefix, then word start, then anywhere; shorter paths first"
+        );
+        assert_eq!(names("trips/be"), ["/Photos/trips/beach"]);
+        assert!(names("  ").is_empty());
+        assert!(names("zzz").is_empty());
+        assert_eq!(search(&view, "beach", 1).len(), 1);
+        let hit = &search(&view, "trips/beach", 10)[0];
+        assert_eq!((hit.entry.id.as_str(), hit.parent), (deep.as_str(), Some(trips.as_str())));
+    }
+
+    #[test]
+    fn free_names() {
+        let taken = ["beach.jpg", "beach (2).jpg", "notes", ".env"];
+        let is_taken = |n: &str| taken.contains(&n);
+        assert_eq!(free_name("pier.jpg", is_taken), "pier.jpg");
+        assert_eq!(free_name("beach.jpg", is_taken), "beach (3).jpg");
+        assert_eq!(free_name("notes", is_taken), "notes (2)");
+        assert_eq!(free_name(".env", is_taken), ".env (2)");
     }
 
     #[test]

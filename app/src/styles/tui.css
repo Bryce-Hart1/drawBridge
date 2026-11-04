@@ -1,0 +1,226 @@
+/* Claude — Date 11/03/2026
+   The terminal look. Everything sits on a character grid: a cell is 1ch wide
+   and --cell-h tall, so rows, frames and columns line up the way a TUI's do.
+   Strict monochrome: ink, paper and two grays, swapped for dark mode.
+
+   The font is the system's monospace (SF Mono on macOS). It carries the whole
+   box-drawing and block range (┌ ─ █ ░ ▸ ●), so nothing falls back to another
+   font, and there is nothing to bundle. */
+
+:root {
+  --cell-h: 20px;
+  --paper: #f6f6f4;
+  --ink: #111111;
+  --dim: #6f6f6f;
+  --faint: #d6d6d2;
+  /* Room above the outer frame: on macOS the traffic lights sit on its top border. */
+  --top: 12px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0d0d0d;
+    --ink: #e2e2e2;
+    --dim: #8a8a8a;
+    --faint: #2b2b2b;
+  }
+}
+
+.mac-overlay {
+  --top: 15px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: var(--cell-h);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: default;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  caret-color: var(--ink);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+pre {
+  margin: 0;
+  font: inherit;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+::-webkit-scrollbar {
+  width: 1ch;
+  height: 1ch;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-left: 1px solid var(--faint);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--ink);
+}
+
+/* ── frames ─────────────────────────────────────────────── */
+
+.frame {
+  position: relative;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+}
+
+.frame.double {
+  border: 3px double var(--ink);
+}
+
+/* A title cut into a frame's top border: ┌─ title ──┐ */
+.legend {
+  position: absolute;
+  top: calc(var(--cell-h) / -2 - 1px);
+  left: 2ch;
+  height: var(--cell-h);
+  padding: 0 1ch;
+  background: var(--paper);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.frame.double > .legend {
+  top: calc(var(--cell-h) / -2 - 2px);
+}
+
+/* ── rows ───────────────────────────────────────────────── */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 2ch;
+  height: var(--cell-h);
+  padding: 0 1ch;
+  white-space: nowrap;
+  overflow: hidden;
+  flex: none;
+}
+
+.rule-top {
+  border-top: 1px solid var(--ink);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.inv {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.dim {
+  color: var(--dim);
+}
+
+.inv .dim {
+  color: var(--faint);
+}
+
+.key,
+.err {
+  font-weight: 700;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Box-drawing pictures: a tighter line so vertical strokes join. */
+.glyph {
+  line-height: 1.12;
+  white-space: pre;
+  color: var(--dim);
+}
+
+/* Photos stay gray, so the app stays monochrome. Stored in color; drop this
+   filter to show it. */
+.thumb {
+  filter: grayscale(1);
+}
+
+/* ── layout ─────────────────────────────────────────────── */
+
+.screen {
+  position: fixed;
+  inset: 0;
+  padding: var(--top) 10px 10px;
+  display: flex;
+}
+
+/* A box floating over the browser, in the space between the path bar and the
+   transfer line, so the prompt line under it stays in view. */
+.overlay {
+  position: absolute;
+  inset: calc(var(--top) + 2.5 * var(--cell-h)) 4ch calc(10px + 3 * var(--cell-h));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.overlay > .frame {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  max-height: 100%;
+  /* A margin of paper around it, as a TUI window clears what's under it. */
+  box-shadow: 0 0 0 1ch var(--paper);
+}
+
+.overlay.full > .frame {
+  width: 100%;
+  height: 100%;
+}

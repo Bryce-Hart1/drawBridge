@@ -4,7 +4,7 @@
 # no UI or Tauri dependencies of its own.
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/cli"]
+members = ["crates/core", "crates/cli", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
