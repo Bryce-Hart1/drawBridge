@@ -1,6 +1,6 @@
 # drawBridge
 
-Personal cloud storage on top of [swiftSearch](../multithread_Search/swiftSearch).
+Personal cloud storage on top of [swiftSearch](https://github.com/Bryce-Hart1/swiftSearch).
 Upload, browse, stream or download photos, music, video, files and text notes
 from any of your devices. drawBridge has no server of its own. The Rust core in the
 app talks to swiftSearch through castle+ over HTTPS, and directly over loopback
