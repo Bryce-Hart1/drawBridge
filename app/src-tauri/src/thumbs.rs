@@ -4,18 +4,21 @@
 // and then served from a folder in the app's cache: a blob never changes, so
 // neither does its thumbnail.
 //
-// A miss is remembered too. Thumbnails are written before their blob's
-// manifest (core's blob.rs), so a photo without one now never gets one; it was
-// uploaded before thumbnails existed, or couldn't be decoded.
+// A miss is remembered too, so a photo or video without one isn't asked for
+// again. Photo thumbnails are made at upload (core's thumb.rs). The rest,
+// video posters and HEIC thumbnails, are drawn by the page from the stream
+// (app/src/lib/posters.ts) and handed to `save`, which replaces the miss and
+// stores the thumbnail for every other device too.
 
 use std::fs;
 use std::sync::Arc;
 
-use drawbridge_core::keys;
+use drawbridge_core::{Kind, keys, remote};
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{Manager, UriSchemeContext, UriSchemeResponder, Wry};
 use tokio::sync::Semaphore;
 
+use crate::commands::CmdError;
 use crate::config::write_atomic;
 use crate::state::App;
 
@@ -43,6 +46,39 @@ pub fn protocol(ctx: UriSchemeContext<'_, Wry>, request: Request<Vec<u8>>, respo
         };
         responder.respond(response.expect("a response from fixed parts is valid"));
     });
+}
+
+/// The most `save` takes: 256 px JPEGs are a few tens of KiB.
+const MAX_THUMB: usize = 256 << 10;
+
+/// Keep a thumbnail the page drew, here and (if this device may write) in the
+/// store, where every device finds it. `true` if it reached the store.
+pub async fn save(app: &App, blob: &str, jpeg: Vec<u8>) -> Result<bool, CmdError> {
+    let key = keys::thumb(blob).map_err(|e| CmdError::new("invalid", e.to_string()))?;
+    if jpeg.len() > MAX_THUMB || !jpeg.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Err(CmdError::new("invalid", "a thumbnail must be a JPEG under 256 KiB"));
+    }
+    let dir = app.cache_dir.join("thumbs");
+    fs::create_dir_all(&dir)?;
+    write_atomic(&dir.join(format!("{blob}.jpg")), &jpeg)?;
+    let _ = fs::remove_file(dir.join(format!("{blob}.none")));
+    let Some(remote) = app.remote() else { return Ok(false) };
+    match remote.put(&key, Kind::Img, jpeg.into()).await {
+        Ok(_) => Ok(true),
+        // A read-only key: it stays a local thumbnail.
+        Err(remote::Error::Forbidden) => Ok(false),
+        Err(e) => Err(drawbridge_core::Error::Remote(e).into()),
+    }
+}
+
+/// Bytes the thumbnail cache holds.
+pub fn usage(app: &App) -> u64 {
+    let Ok(dir) = fs::read_dir(app.cache_dir.join("thumbs")) else { return 0 };
+    dir.filter_map(|e| e.ok()?.metadata().ok()).map(|m| m.len()).sum()
+}
+
+pub fn clear(app: &App) {
+    let _ = fs::remove_dir_all(app.cache_dir.join("thumbs"));
 }
 
 async fn fetch(app: &App, blob: &str) -> Option<Vec<u8>> {

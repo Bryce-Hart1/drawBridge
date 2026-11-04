@@ -64,14 +64,52 @@ export function splitName(name: string): [string, string] {
   return dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
 }
 
-/** Notes opened in the editor stay this small: the whole text is held in memory. */
+/** Text up to this size opens for editing; past it, its first 1 MiB opens read-only. */
 export const NOTE_LIMIT = 1 << 20;
 
-/** Opens in the note editor: text, and small enough to edit in place. */
+const TEXT_TYPES = ['application/json', 'application/xml', 'application/javascript', 'application/x-sh'];
+
+/** Opens in the note editor: text of any size (the start of a big file, read-only). */
 export function isText(item: Item): boolean {
   const mime = baseMime(item.mime);
-  const text = mime.startsWith('text/') || mime === 'application/json';
-  return item.kind === 'file' && text && (item.size ?? 0) <= NOTE_LIMIT;
+  return item.kind === 'file' && (mime.startsWith('text/') || TEXT_TYPES.includes(mime));
+}
+
+export type Preview = 'image' | 'audio' | 'video' | 'pdf';
+
+/** What the viewer shows a file as, if anything. Whether it can actually play
+ *  is up to the webview (`canPlayType`); the viewer checks. */
+export function preview(item: Item): Preview | null {
+  if (item.kind !== 'file' || !item.blob) return null;
+  const mime = baseMime(item.mime);
+  if (mime === 'application/pdf') return 'pdf';
+  const top = mime.split('/')[0];
+  return top === 'image' || top === 'audio' || top === 'video' ? top : null;
+}
+
+/** `92` → `1:32`, `3723` → `1:02:03`. Unknown lengths are `-:--`. */
+export function duration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '-:--';
+  const s = Math.floor(seconds);
+  const [h, m, sec] = [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60];
+  const mm = h > 0 ? String(m).padStart(2, '0') : String(m);
+  return `${h > 0 ? `${h}:` : ''}${mm}:${String(sec).padStart(2, '0')}`;
+}
+
+/** The player's bar: `█` played, `▒` loaded ahead, `░` the rest. */
+export function scrubBar(played: number, loaded: number, total: number, cells: number): string {
+  if (cells <= 0) return '';
+  const at = (v: number) => (total > 0 ? Math.max(0, Math.min(cells, Math.round((v / total) * cells))) : 0);
+  const p = at(played);
+  const l = Math.max(p, at(loaded));
+  return '█'.repeat(p) + '▒'.repeat(l - p) + '░'.repeat(cells - l);
+}
+
+/** `vol ▮▮▮▯`, four steps, or `vol muted`. */
+export function volumeBar(volume: number, muted: boolean): string {
+  if (muted || volume === 0) return 'muted';
+  const on = Math.max(1, Math.round(volume * 4));
+  return '▮'.repeat(on) + '▯'.repeat(4 - on);
 }
 
 // What core/src/thumb.rs makes thumbnails of at upload.
@@ -79,6 +117,16 @@ const THUMBNAILED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 export function hasThumb(item: Item): boolean {
   return item.kind === 'file' && item.blob !== null && THUMBNAILED.includes(baseMime(item.mime));
+}
+
+// Drawn by the page instead, from the stream (posters.ts): types the image
+// crate doesn't decode but WebKit does, and video.
+const POSTERED = ['image/heic', 'image/heif', 'image/avif', 'image/tiff', 'image/bmp'];
+
+/** May have a thumbnail the page drew; if it hasn't one yet, the page can draw it. */
+export function wantsPoster(item: Item): boolean {
+  const mime = baseMime(item.mime);
+  return item.kind === 'file' && item.blob !== null && (mime.startsWith('video/') || POSTERED.includes(mime));
 }
 
 export function errorText(e: unknown): string {

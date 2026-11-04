@@ -1,11 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "What the one window may do: Tauri's core APIs (events, window state), the open and save panels, and dragging the window by its title (it has no title bar of its own).",
+  "description": "What the one window may do: Tauri's core APIs (events, window state), the open and save panels, dragging the window by its title (it has no title bar of its own), and going fullscreen for video.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
     "dialog:allow-open",
     "dialog:allow-save"
   ]

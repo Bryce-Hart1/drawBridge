@@ -1,12 +1,13 @@
 // Claude — Date 11/03/2026
 // The key map: one key per action, as the key-hint bar shows them. Arrows and
 // hjkl both move. What left and right do depends on the view: in the list they
-// go up a folder and into one, in the grid they move between tiles.
+// go up a folder and into one, in the grid they move between tiles. The viewer
+// and player have keys of their own (Viewer.svelte, Player.svelte).
 
 export type Action =
   | 'up' | 'down' | 'left' | 'right' | 'open' | 'back' | 'top' | 'bottom' | 'pageUp' | 'pageDown'
   | 'upload' | 'mkdir' | 'note' | 'rename' | 'move' | 'delete' | 'save'
-  | 'find' | 'grid' | 'sync' | 'cancel' | 'help';
+  | 'find' | 'grid' | 'sync' | 'cancel' | 'help' | 'external' | 'settings';
 
 export interface KeyLike {
   key: string;
@@ -33,6 +34,8 @@ const PLAIN: Record<string, Action> = {
   m: 'move',
   d: 'delete', Delete: 'delete',
   o: 'save',
+  e: 'external',
+  ',': 'settings',
   '/': 'find',
   g: 'grid',
   s: 'sync',
@@ -41,8 +44,9 @@ const PLAIN: Record<string, Action> = {
 };
 
 export function actionFor(e: KeyLike): Action | null {
-  // ⌘F finds; every other ⌘, Ctrl or ⌥ chord is left to the system (⌘Q, ⌘W…).
-  if (e.metaKey || e.ctrlKey) return e.key === 'f' ? 'find' : null;
+  // ⌘F finds and ⌘, opens the settings; every other ⌘, Ctrl or ⌥ chord is
+  // left to the system (⌘Q, ⌘W…).
+  if (e.metaKey || e.ctrlKey) return e.key === 'f' ? 'find' : e.key === ',' ? 'settings' : null;
   if (e.altKey) return null;
   return PLAIN[e.key] ?? null;
 }

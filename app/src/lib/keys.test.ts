@@ -18,6 +18,9 @@ describe('keys', () => {
     expect(key('q', { metaKey: true })).toBeNull();
     expect(key('w', { metaKey: true })).toBeNull();
     expect(key('f', { metaKey: true })).toBe('find');
+    expect(key(',', { metaKey: true })).toBe('settings');
+    expect(key(',')).toBe('settings');
+    expect(key('e')).toBe('external');
     expect(key('d', { altKey: true })).toBeNull();
     expect(key('z')).toBeNull();
   });

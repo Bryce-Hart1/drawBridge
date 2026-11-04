@@ -3,11 +3,15 @@
 // tree, transfers that tick along on a timer, and drawn thumbnails. The app
 // itself never loads this (see api.ts).
 //
+// The viewer gets drawn photos, a generated tone for songs and a one-page PDF.
+// Videos never load, so the player's can't-play panel shows; `tape.mkv` gets
+// it straight away, as the app would.
+//
 // Add `?setup` to the URL to start at the setup screen. On it, the key `bad`
 // is rejected and anything else connects.
 
 import type { Backend, DropEvent, Unlisten } from './api';
-import type { CmdError, Hit, Id, Item, Listing, NoteTarget, Status, SyncStatus, Transfer } from './types';
+import type { CacheInfo, CmdError, Hit, Id, Item, Listing, NoteTarget, Status, SyncStatus, Transfer } from './types';
 
 interface Node {
   id: Id;
@@ -25,6 +29,7 @@ const MIME: Record<string, string> = {
   mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg', flac: 'audio/flac',
   md: 'text/markdown; charset=utf-8', txt: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
   csv: 'text/csv; charset=utf-8', json: 'application/json', pdf: 'application/pdf',
+  mkv: 'video/x-matroska', heic: 'image/heic', c: 'text/plain; charset=utf-8',
 };
 
 function mimeOf(name: string): string {
@@ -58,6 +63,8 @@ for (const [name, size] of [['beach.jpg', 2_048_311], ['sunset.jpg', 3_401_772],
   add(y2026, name, size);
 }
 add(y2026, 'clip.mp4', 85_337_100);
+add(y2026, 'IMG_0412.heic', 2_811_004);
+add(y2026, 'tape.mkv', 1_204_003_118);
 const trips = add(photos, 'trips');
 for (let i = 1; i <= 14; i++) add(trips, `lisbon-${String(i).padStart(2, '0')}.jpg`, 1_500_000 + i * 91_337);
 const music = add(null, 'Music');
@@ -67,6 +74,7 @@ const docs = add(null, 'Documents');
 add(docs, 'notes.md', undefined, '# notes\n\n- call the plumber\n- back up the photos\n- read about castle+ keep-alive\n');
 add(docs, 'budget.csv', undefined, 'month,rent,food\njan,1200,410\nfeb,1200,388\n');
 add(docs, 'lease.pdf', 402_118);
+add(docs, 'finalMain.c', undefined, '#include <stdio.h>\n\nint main(void) {\n    puts("hello");\n    return 0;\n}\n');
 const logs = add(null, 'logs');
 for (let i = 0; i < 400; i++) add(logs, `run-${String(i).padStart(3, '0')}.log`, undefined, `run ${i}: ok\n`);
 add(null, 'readme.md', undefined, 'drawBridge mock store.\n\nEverything here is fake.\n');
@@ -164,6 +172,60 @@ let device: string | null = connected ? 'laptop' : null;
 function status(): Status {
   return { connected, url: connected ? 'http://127.0.0.1:8080' : null, device, suggestedName: 'Mock MacBook', sync };
 }
+
+/** A few seconds of a soft chord, as a WAV, for the mock player. */
+function tone(): string {
+  const rate = 8000;
+  const secs = 12;
+  const n = rate * secs;
+  const buf = new DataView(new ArrayBuffer(44 + n));
+  const str = (at: number, t: string) => [...t].forEach((c, i) => buf.setUint8(at + i, c.charCodeAt(0)));
+  str(0, 'RIFF');
+  buf.setUint32(4, 36 + n, true);
+  str(8, 'WAVEfmt ');
+  buf.setUint32(16, 16, true);
+  buf.setUint16(20, 1, true);
+  buf.setUint16(22, 1, true);
+  buf.setUint32(24, rate, true);
+  buf.setUint32(28, rate, true);
+  buf.setUint16(32, 1, true);
+  buf.setUint16(34, 8, true);
+  str(36, 'data');
+  buf.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) {
+    const t = i / rate;
+    const v = Math.sin(2 * Math.PI * 220 * t) + Math.sin(2 * Math.PI * 277 * t) + Math.sin(2 * Math.PI * 330 * t);
+    buf.setUint8(44 + i, 128 + Math.round(v * 12 * Math.min(1, t, secs - t)));
+  }
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
+/** A one-page PDF that says what it is. */
+function pdf(name: string): string {
+  const text = `(drawBridge mock: ${name.replace(/[()\\]/g, '')}) Tj`;
+  const stream = `BT /F1 18 Tf 72 720 Td ${text} ET`;
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const at: number[] = [];
+  objs.forEach((o, i) => {
+    at.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const a of at) out += `${String(a).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return URL.createObjectURL(new Blob([out], { type: 'application/pdf' }));
+}
+
+let song: string | null = null;
+let cache: CacheInfo = { bytes: 734 * 2 ** 20, chunks: 92, cap: 2 * 2 ** 30, thumbs: 3_481_220 };
 
 function thumb(blob: string): string {
   // A little landscape, different for every blob. The UI shows it in gray.
@@ -288,7 +350,7 @@ export function mockBackend(): Backend {
     },
     async noteRead(id) {
       await sleep(150);
-      return live(id).text ?? '';
+      return { text: live(id).text ?? '', truncated: false };
     },
     async noteSave(target: NoteTarget, text) {
       await sleep(250);
@@ -314,7 +376,45 @@ export function mockBackend(): Backend {
       emit('sync-status', sync);
     },
 
-    thumbUrl: thumb,
+    async streamUrl(id) {
+      await sleep(120);
+      const n = live(id);
+      const mime = n.mime ?? '';
+      if (mime.startsWith('image/')) return thumb(n.blob ?? id);
+      if (mime.startsWith('audio/')) return (song ??= tone());
+      if (mime === 'application/pdf') return pdf(n.name);
+      // Nothing a <video> can play.
+      return `data:${mime},`;
+    },
+    async openExternal() {
+      await sleep(200);
+      return 'QuickTime Player';
+    },
+    async cacheInfo() {
+      return cache;
+    },
+    async cacheSetCap(bytes) {
+      cache = { ...cache, cap: bytes, bytes: Math.min(cache.bytes, Math.floor(bytes * 0.9)) };
+      return cache;
+    },
+    async cacheClear() {
+      cache = { ...cache, bytes: 0, chunks: 0, thumbs: 0 };
+      return cache;
+    },
+    async thumbSave() {
+      return true;
+    },
+
+    thumbUrl: (blob) => thumb(blob),
+    async toggleFullscreen() {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+      return !!document.fullscreenElement;
+    },
+    async setFullscreen(on) {
+      if (!on && document.fullscreenElement) await document.exitFullscreen();
+      if (on && !document.fullscreenElement) await document.documentElement.requestFullscreen();
+    },
     async pickFiles() {
       return ['/Users/you/Desktop/new-photo.jpg', '/Users/you/Desktop/beach.jpg'];
     },

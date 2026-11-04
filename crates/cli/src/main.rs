@@ -20,15 +20,22 @@ use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use drawbridge_core::blob::{self, UploadOptions};
+use drawbridge_core::cache::Cache;
+use drawbridge_core::stream::{self, StreamConfig};
 use drawbridge_core::oplog::check_name;
 use drawbridge_core::sync::{self, SyncOptions};
 use drawbridge_core::{ByteRange, Db, Dest, Device, Entry, Error, Lookup, Manifest, Progress, Remote, View, index};
 
 static STOP: AtomicBool = AtomicBool::new(false);
+
+/// What `dbx stream` keeps of what it has served, in `<home>/cache`.
+const STREAM_CACHE: u64 = 1 << 30;
 
 #[derive(Parser)]
 #[command(name = "dbx", about = "drawBridge from the command line", version)]
@@ -130,6 +137,12 @@ enum Command {
         // allow_hyphen_values: `-7` is a range here, not a flag.
         #[arg(long, value_parser = parse_range, allow_hyphen_values = true)]
         range: Option<ByteRange>,
+    },
+    /// Serve a file on loopback, the way the app's player reads it, and print
+    /// its URL for curl, a browser, IINA or VLC. Runs until Ctrl-C.
+    Stream {
+        /// A path, an entry id, or a blob id.
+        what: String,
     },
     /// Show a file's entry and its blob's manifest.
     Info {
@@ -317,6 +330,24 @@ async fn run(cli: Cli) -> Result<(), Error> {
             let r = remote()?;
             let m = blob::manifest(&r, &blob).await?;
             cat(&r, &m, range).await?;
+        }
+        Command::Stream { what } => {
+            let (blob, name) = target(&db()?, &what)?;
+            let r = Arc::new(remote()?);
+            blob::manifest(&r, &blob).await?;
+            let cache = Cache::open(&home.join("cache"), STREAM_CACHE)?;
+            let cfg = StreamConfig {
+                cache,
+                remote: Arc::new(move || Some(r.clone())),
+                origins: Vec::new(),
+                idle: Duration::from_secs(u32::MAX as u64),
+            };
+            let server = stream::Server::start(cfg, None).await?;
+            println!("{}", server.url(&blob, name.as_deref().unwrap_or(&blob)));
+            eprintln!("  serving until Ctrl-C");
+            while !STOP.load(Ordering::Relaxed) {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
         }
         Command::Info { what } => {
             let db = db()?;

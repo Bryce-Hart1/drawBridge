@@ -1,24 +1,38 @@
 <script lang="ts">
   // Claude — Date 11/03/2026
   // The right-hand pane: the selected entry's thumbnail (or its picture), and
-  // what it is.
+  // what it is. A video or HEIC photo without a thumbnail yet gets one drawn
+  // from the stream (posters.ts) while it's selected.
   import { api } from '../lib/api';
-  import { hasThumb, sizeLabel, typeLabel } from '../lib/format';
+  import { hasThumb, sizeLabel, typeLabel, wantsPoster } from '../lib/format';
   import { glyph } from '../lib/glyphs';
+  import { makePoster } from '../lib/posters';
   import { current, ui } from '../lib/state.svelte';
+  import type { Item } from '../lib/types';
 
   const item = $derived(current());
   const where = $derived(`/${ui.listing.path.map((c) => c.name).join('/')}`);
   /** The blob whose thumbnail just failed to load. */
   let missing = $state<string | null>(null);
+
+  function onerror(it: Item) {
+    missing = it.blob;
+    if (!wantsPoster(it)) return;
+    makePoster(it).then((ok) => {
+      if (!ok) return;
+      ui.posters[it.blob!] = Date.now();
+      if (missing === it.blob) missing = null;
+    });
+  }
 </script>
 
 <div class="inspector">
   {#if item}
     <div class="art">
-      {#if hasThumb(item) && missing !== item.blob}
-        {#key item.blob}
-          <img class="thumb" src={api.thumbUrl(item.blob!)} alt="" onerror={() => (missing = item.blob)} />
+      {#if (hasThumb(item) || wantsPoster(item)) && missing !== item.blob}
+        {@const v = ui.posters[item.blob!]}
+        {#key `${item.blob}:${v}`}
+          <img class="thumb" src={api.thumbUrl(item.blob!, v)} alt="" onerror={() => onerror(item)} />
         {/key}
       {:else}
         <pre class="glyph">{glyph(item)}</pre>

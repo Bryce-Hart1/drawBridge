@@ -21,7 +21,9 @@ export type Overlay =
   | { kind: 'help' }
   | { kind: 'find' }
   | { kind: 'move'; item: Item }
-  | { kind: 'note'; id: Id | null; parent: Id | null; name: string };
+  | { kind: 'note'; id: Id | null; parent: Id | null; name: string; size?: number }
+  | { kind: 'view'; item: Item }
+  | { kind: 'settings' };
 
 export const ui = $state({
   status: null as Status | null,
@@ -35,6 +37,8 @@ export const ui = $state({
   transfers: {} as Record<number, Transfer>,
   /** Files are being dragged over the window. */
   dropping: false,
+  /** Blob → when its thumbnail was drawn here, so views showing a miss load it again. */
+  posters: {} as Record<string, number>,
 });
 
 export function current(): Item | undefined {

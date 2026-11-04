@@ -5,8 +5,9 @@
 //   index-changed  the tree changed (here, or pulled from another device)
 //   sync-status    syncing, synced, offline or failed
 //   transfer       an upload or download moved along
-// Thumbnails load over the `thumb://` protocol (thumbs.rs). No HTTP server
-// runs in the app.
+// Thumbnails load over the `thumb://` protocol (thumbs.rs). Photos, audio,
+// video and PDFs load from core's stream server, on loopback, started when
+// something is first opened and stopped when nothing has been for a while.
 
 mod commands;
 mod config;
@@ -58,6 +59,12 @@ pub fn run() {
             commands::transfers,
             commands::note_read,
             commands::note_save,
+            commands::stream_url,
+            commands::open_external,
+            commands::cache_info,
+            commands::cache_set_cap,
+            commands::cache_clear,
+            commands::thumb_save,
             commands::sync_now,
         ])
         .run(tauri::generate_context!())

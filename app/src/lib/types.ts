@@ -85,6 +85,22 @@ export interface Transfer {
   error: string | null;
 }
 
+/** A text file as the editor gets it. */
+export interface NoteText {
+  text: string;
+  /** Only the first 1 MiB is in `text`: shown read-only. */
+  truncated: boolean;
+}
+
+/** The chunk cache, for the settings. */
+export interface CacheInfo {
+  bytes: number;
+  chunks: number;
+  cap: number;
+  /** Bytes of cached thumbnails, counted apart from the cap. */
+  thumbs: number;
+}
+
 /** Where a note is saved: over an existing file, or as a new one. */
 export type NoteTarget = { id: Id } | { parent: Id | null; name: string };
 

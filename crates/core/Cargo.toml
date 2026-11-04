@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# 11/04/2026: the loopback stream server (stream.rs): one route, HTTP/1.1 only,
+# on the tokio runtime already here. hyper is already in the tree under reqwest.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 # 11/03/2026: request and response bodies. Already a dependency of reqwest, so
 # nothing new is built; named here because `Bytes` is in this crate's public API.
 bytes = "1"
@@ -14,6 +17,9 @@ futures-util = { version = "0.3.34", default-features = false, features = ["std"
 # 11/03/2026: photo thumbnails, made from the local file at upload. Only the
 # four codecs drawBridge makes thumbnails of; defaults (rayon, a dozen formats)
 # off.
+# 11/04/2026: the stream server's URL token, 32 bytes from the OS. Already in
+# the tree under uuid.
+getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 # 11/03/2026: the swiftSearch client. Same version and feature set as
 # agil_backend. Default features are off, which also drops HTTP/2: swiftSearch
@@ -27,7 +33,7 @@ serde_json = "1.0.150"
 # 11/03/2026: per-chunk and whole-file hashes in blob manifests. The same crate
 # and version as agil_backend.
 sha2 = "0.10"
-tokio = { version = "1.52.3", features = ["fs", "io-util", "rt", "time"] }
+tokio = { version = "1.52.3", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
 # 11/03/2026: blob ids. v7 ids start with a timestamp, so they sort by age.
 uuid = { version = "1.23.3", features = ["v7"] }
 

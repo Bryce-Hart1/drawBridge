@@ -1,7 +1,7 @@
 // Claude — Date 11/03/2026
 // What the app remembers between launches besides the index: which store it
-// talks to and what this device is called (`config.json` in the app's data
-// folder), and the store's access key.
+// talks to, what this device is called and how big the chunk cache may grow
+// (`config.json` in the app's data folder), and the store's access key.
 //
 // Release builds keep the key in the macOS Keychain. Debug builds keep it in a
 // file beside the config (readable by this user only) instead: each rebuild is
@@ -19,6 +19,9 @@ pub struct Config {
     /// The store, as `Remote::base` normalizes it.
     pub url: String,
     pub device_name: String,
+    /// The chunk cache's cap in bytes; the default when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_cap: Option<u64>,
 }
 
 const FILE: &str = "config.json";
@@ -137,7 +140,7 @@ mod tests {
     fn config_and_keys_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         assert!(load(dir.path()).is_none());
-        let c = Config { url: "http://127.0.0.1:8080".into(), device_name: "laptop".into() };
+        let c = Config { url: "http://127.0.0.1:8080".into(), device_name: "laptop".into(), cache_cap: Some(1 << 30) };
         save(dir.path(), &c).unwrap();
         assert_eq!(load(dir.path()), Some(c.clone()));
 

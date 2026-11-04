@@ -183,10 +183,9 @@ pre {
   color: var(--dim);
 }
 
-/* Photos stay gray, so the app stays monochrome. Stored in color; drop this
-   filter to show it. */
+/* Photos and posters show in their own colors; only the chrome is monochrome. */
 .thumb {
-  filter: grayscale(1);
+  image-orientation: from-image;
 }
 
 /* ── layout ─────────────────────────────────────────────── */

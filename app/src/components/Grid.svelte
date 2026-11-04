@@ -1,11 +1,12 @@
 <script lang="ts">
   // Claude — Date 11/03/2026
-  // The folder as tiles: a photo's thumbnail (in gray), or a box-drawing
-  // picture of what the entry is. Thumbnails load as tiles scroll into view.
+  // The folder as tiles: a photo's thumbnail or a video's poster, or a
+  // box-drawing picture of what the entry is. Thumbnails load as tiles scroll
+  // into view.
   import { SvelteSet } from 'svelte/reactivity';
   import { open } from '../lib/actions';
   import { api } from '../lib/api';
-  import { hasThumb } from '../lib/format';
+  import { hasThumb, wantsPoster } from '../lib/format';
   import { glyph } from '../lib/glyphs';
   import { ui } from '../lib/state.svelte';
   import Empty from './Empty.svelte';
@@ -14,7 +15,7 @@
 
   let tiles: HTMLDivElement | undefined = $state();
   let width = $state(0);
-  /** Blobs whose thumbnail didn't load (none in the store): drawn instead. */
+  /** `blob:version` of thumbnails that didn't load (none in the store): drawn instead. */
   const missing = new SvelteSet<string>();
 
   // How many tiles fit in a row, for ↑ and ↓.
@@ -35,16 +36,18 @@
     <div class="tiles" bind:this={tiles}>
       {#each ui.listing.items as item, i (item.id)}
         {@const sel = i === ui.sel}
+        {@const v = item.blob ? ui.posters[item.blob] : undefined}
+        {@const tag = `${item.blob}:${v ?? 0}`}
         <button class="tile" class:sel onclick={() => (ui.sel = i)} ondblclick={() => open(item)}>
           <div class="art">
-            {#if hasThumb(item) && !missing.has(item.blob!)}
+            {#if (hasThumb(item) || wantsPoster(item)) && !missing.has(tag)}
               <img
                 class="thumb"
-                src={api.thumbUrl(item.blob!)}
+                src={api.thumbUrl(item.blob!, v)}
                 alt=""
                 loading="lazy"
                 decoding="async"
-                onerror={() => missing.add(item.blob!)}
+                onerror={() => missing.add(tag)}
               />
             {:else}
               <pre class="glyph">{glyph(item)}</pre>

@@ -6,7 +6,7 @@ from any of your devices. drawBridge has no server of its own. The Rust core in 
 app talks to swiftSearch through castle+ over HTTPS, and directly over loopback
 in development.
 
-**Status: M3.** Done so far:
+**Status: M4.** Done so far:
 - the swiftSearch client
 - chunked, resumable blobs, with a local upload queue in SQLite
 - the shared folder tree: each device writes its changes to its own op log in
@@ -17,19 +17,21 @@ in development.
 - the desktop app (Tauri): a monochrome, terminal-style window for browsing,
   uploading (picker or drag-and-drop, folders included), downloading, moving,
   renaming, deleting, notes, search across every folder, and photo thumbnails
+- streaming and previews: photos full size, audio and video that play and seek
+  without downloading the whole file, PDFs, code as text, video posters and
+  HEIC thumbnails, through a capped on-disk cache
 
-Still to come, in order: streaming and previews (photos full size, audio and
-video), and deployment. What
+Still to come: deployment through castle+. What
 drawBridge writes into the store is specified in [docs/FORMAT.md](docs/FORMAT.md).
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `crates/core` | `drawbridge-core`: the store format and all traffic to swiftSearch |
+| `crates/core` | `drawbridge-core`: the store format, all traffic to swiftSearch, the chunk cache and the stream server |
 | `crates/cli` | `dbx`, the core from the shell |
 | `app/src` | The app's UI: Svelte 5 and TypeScript, no UI library |
-| `app/src-tauri` | The app's shell: commands, sync loop, transfer queue, `thumb://` |
+| `app/src-tauri` | The app's shell: commands, sync loop, transfer queue, `thumb://`, the cache and stream wiring |
 | `docs/FORMAT.md` | The on-store format: the contract any other client follows |
 
 ## Trying it with `dbx`
@@ -67,6 +69,7 @@ cargo run -q -p drawbridge-cli -- sync && cargo run -q -p drawbridge-cli -- get 
 | `dbx get WHAT [OUT]` | Downloads and checks every chunk's sha256. It won't replace `OUT` without `--force`. |
 | `dbx cat WHAT [--range R]` | Writes a file to stdout, or a range of it: `first-last`, `first-` or `-count` |
 | `dbx info WHAT` | Prints the file's entry and its blob's manifest: size, type, chunks, sha256 |
+| `dbx stream WHAT` | Serves the file on loopback the way the app's player reads it, and prints a URL for curl, a browser, IINA or VLC. Runs until Ctrl-C. |
 | `dbx pending` | Lists unfinished uploads |
 | `dbx resume BLOB` / `dbx cancel BLOB` | Finishes an unfinished upload, or deletes what it sent |
 
@@ -106,6 +109,21 @@ the look without a store. Add `?setup` for the setup screen.
 Every action has a key, shown along the bottom; `?` lists them all. The app
 syncs at launch, when its window comes to the front, after each change, and
 every minute while it's on screen. Hidden, it makes no requests.
+
+Enter opens a file where it can be read:
+- **Text and code** open in the editor. Over 1 MiB, the first MiB shows read-only.
+- **Photos, PDFs, songs and videos** open in the viewer. Songs and videos get a
+  player line: space plays, ← → seek, ↑ ↓ set the volume.
+- **Formats WebKit can't play** (mkv, avi) can be opened in IINA, VLC or
+  QuickTime with `e`.
+- **Anything else** saves a copy.
+
+Files are read through a small HTTP server on `127.0.0.1`. It starts the first
+time something is opened and stops after ten idle minutes, and its URLs carry a
+random token. What it fetches is kept in a cache on disk, capped at 2 GiB; `,`
+opens the settings to change the cap or clear the cache. A video or HEIC photo
+gets its thumbnail the first time it's selected: the window draws one from the
+file and stores it for every device.
 
 ## Tests
 

@@ -1,7 +1,8 @@
 // Claude — Date 11/03/2026
 // The app's state, shared by every command, the sync loop, the transfer queue
 // and the thumbnail protocol: the local Db, the store (once connected), the
-// tree as last read from the Db, and the sync status the title bar shows.
+// tree as last read from the Db, the sync status the title bar shows, and the
+// chunk cache and stream server the viewer reads through.
 //
 // The tree is kept as one `Arc<View>`, rebuilt whenever the index changes, so
 // listing a folder or searching never re-reads the Db.
@@ -9,7 +10,10 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::Duration;
 
+use drawbridge_core::cache::Cache;
+use drawbridge_core::stream::{self as streaming, StreamConfig};
 use drawbridge_core::sync::{self, SyncOptions};
 use drawbridge_core::{Db, Error, Remote, View, remote};
 use serde::Serialize;
@@ -22,6 +26,12 @@ use crate::sync_loop::{Kick, Syncer};
 use crate::transfers::{Dir, Job, Transfers};
 
 const DB_FILE: &str = "state.sqlite";
+
+/// The chunk cache's cap until the settings say otherwise.
+pub const DEFAULT_CACHE_CAP: u64 = 2 << 30;
+
+/// The stream server stops after this long without a request.
+const STREAM_IDLE: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -63,6 +73,9 @@ pub struct App {
     sync: Mutex<SyncStatus>,
     pub syncer: Syncer,
     pub transfers: Transfers,
+    pub cache: Arc<Cache>,
+    /// Started on the first stream, and again after it stops for being idle.
+    stream: tokio::sync::Mutex<Option<streaming::Server>>,
 }
 
 impl App {
@@ -75,6 +88,8 @@ impl App {
         let view = db.view()?;
         let config = config::load(&data_dir);
         let remote = config.as_ref().and_then(|c| Remote::new(&c.url, &config::load_key(&data_dir, &c.url)?).ok());
+        let cap = config.as_ref().and_then(|c| c.cache_cap).unwrap_or(DEFAULT_CACHE_CAP);
+        let cache = Cache::open(&cache_dir.join("chunks"), cap)?;
         let (syncer, kicks) = Syncer::new();
         let app = App {
             handle,
@@ -87,6 +102,8 @@ impl App {
             sync: Mutex::new(SyncStatus::default()),
             syncer,
             transfers: Transfers::default(),
+            cache,
+            stream: tokio::sync::Mutex::default(),
         };
         Ok((app, kicks))
     }
@@ -101,6 +118,35 @@ impl App {
 
     pub fn require_remote(&self) -> Result<Arc<Remote>, CmdError> {
         self.remote().ok_or_else(|| CmdError::new("not_connected", "this device isn't connected to a store"))
+    }
+
+    /// Change and remember the chunk cache's cap.
+    pub fn set_cache_cap(&self, cap: u64) -> std::io::Result<()> {
+        self.cache.set_cap(cap);
+        let mut config = write(&self.config);
+        if let Some(c) = config.as_mut() {
+            c.cache_cap = Some(cap);
+            config::save(&self.data_dir, c)?;
+        }
+        Ok(())
+    }
+
+    /// Where the stream server serves `blob`, starting it if it isn't running.
+    pub async fn stream_url(&self, blob: &str, name: &str) -> Result<String, CmdError> {
+        let mut server = self.stream.lock().await;
+        if !server.as_ref().is_some_and(streaming::Server::is_running) {
+            let handle = self.handle.clone();
+            let cfg = StreamConfig {
+                cache: self.cache.clone(),
+                remote: Arc::new(move || handle.try_state::<Arc<App>>()?.remote()),
+                origins: app_origins(),
+                idle: STREAM_IDLE,
+            };
+            // The same port and token as last time, so the page's URLs still work.
+            let reuse = server.as_ref().map(|s| (s.port(), s.token().to_owned()));
+            *server = Some(streaming::Server::start(cfg, reuse).await?);
+        }
+        Ok(server.as_ref().expect("just started").url(blob, name))
     }
 
     pub fn view(&self) -> Arc<View> {
@@ -191,14 +237,14 @@ impl App {
     pub fn connect(&self, remote: Remote, key: &str, name: &str) -> Result<(), CmdError> {
         let url = remote.base().to_owned();
         let previous = read(&self.config).clone();
-        if previous.is_some_and(|c| c.url != url) {
+        if previous.as_ref().is_some_and(|c| c.url != url) {
             self.reset_index()?;
         }
         let name = if name.is_empty() { config::computer_name() } else { name.to_owned() };
         let me = self.db().init_device(&name)?;
         config::save_key(&self.data_dir, &url, key)
             .map_err(|e| CmdError::new("other", format!("couldn't save the key: {e}")))?;
-        let config = Config { url, device_name: me.name };
+        let config = Config { url, device_name: me.name, cache_cap: previous.and_then(|c| c.cache_cap) };
         config::save(&self.data_dir, &config)?;
         *write(&self.config) = Some(config);
         *write(&self.remote) = Some(Arc::new(remote));
@@ -241,6 +287,17 @@ impl App {
             self.transfers.add(self, Dir::Up, &name, p.size, Job::Resume { blob: p.blob });
         }
     }
+}
+
+/// The page's own origins, which may read streamed bytes from script (to draw
+/// a video frame for a poster): the bundled app on macOS and Linux, on
+/// Windows, and the dev server.
+fn app_origins() -> Vec<String> {
+    let mut origins = vec!["tauri://localhost".to_owned(), "http://tauri.localhost".to_owned()];
+    if cfg!(debug_assertions) {
+        origins.push("http://127.0.0.1:1420".to_owned());
+    }
+    origins
 }
 
 pub fn now_ms() -> u64 {

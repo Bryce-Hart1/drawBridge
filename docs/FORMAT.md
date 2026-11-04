@@ -6,7 +6,7 @@ tool, `curl`). The Rust implementation is `crates/core`. When the two disagree,
 this file is wrong.
 
 **Status:** v1. Blobs (M1) and the index (M2: devices, op logs, checkpoints)
-are settled.
+are settled. Thumbnails may be added after their blob is written (M4).
 
 ---
 
@@ -18,7 +18,7 @@ Everything lives under the root `dbx/v1/`:
 |---|---|---|
 | `dbx/v1/obj/<blob>/<i>` | the uploader, once | Chunk `i` of a blob's content: raw bytes |
 | `dbx/v1/obj/<blob>/manifest.json` | the uploader, once, after every chunk | How to put the chunks back together |
-| `dbx/v1/obj/<blob>/thumb` | the uploader | Thumbnail or video poster (M4) |
+| `dbx/v1/obj/<blob>/thumb` | the uploader, or any device later | Thumbnail or video poster: a JPEG |
 | `dbx/v1/devices.json` | every device, read-merge-write | The devices sharing the store |
 | `dbx/v1/dev/<device>/log/<seq>.json` | that device, once | A batch of index changes |
 | `dbx/v1/dev/<device>/head.json` | that device | How far its log goes |
@@ -96,6 +96,20 @@ An abandoned upload (cancelled, or its file changed) deletes its chunks and its
 manifest. Chunks orphaned by a crash are harmless dead space. Clients delete what
 they can find, and swiftSearch compaction reclaims it.
 
+### Thumbnails
+
+`thumb` is a JPEG at most 256 px on its longer side, with any transparency laid
+on white. It is optional: readers draw something else when it's missing.
+
+- **Photos the uploader can decode** (JPEG, PNG, WebP, GIF in drawBridge) get
+  theirs at upload, PUT with `X-SwiftSearch-Type: img` after the chunks and
+  before the manifest.
+- **Everything else** (video posters, HEIC and AVIF photos) may get one later,
+  from any device that can draw it from the content, such as a web view that
+  plays the video. That device PUTs `thumb` whenever it has one.
+- Two devices may both write one. Either is fine: they are pictures of the same
+  immutable content, so the last write simply wins.
+
 ### Reading a blob
 
 - **A whole chunk** must be exactly its expected length, and its sha256 must
@@ -110,9 +124,17 @@ they can find, and swiftSearch compaction reclaims it.
 ### Serving content
 
 A client that serves blob content to a web view (the desktop app's stream
-server) must never serve `text/html` or `image/svg+xml` as such. Both can run
-script in the app's origin. Serve them as `text/plain` or
-`application/octet-stream`. swiftSearch applies the same rule to its own responses.
+server) must not let stored content run script:
+
+- **`text/html`** (and XHTML) is never served as such. Serve it as `text/plain`.
+- **`image/svg+xml`** may be served as an image only from an origin other than
+  the app's own, with `Content-Security-Policy: sandbox`. An `<img>` never runs
+  an SVG's script, and the sandbox covers someone opening the URL directly.
+- Everything is served with `X-Content-Type-Options: nosniff`.
+
+swiftSearch applies the same idea to its own responses. drawBridge's stream
+server is on `127.0.0.1:<port>`, not the app's origin, and sends the sandbox
+policy with everything except PDFs, which WebKit won't render in a sandbox.
 
 
 ## The index

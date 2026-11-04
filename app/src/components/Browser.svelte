@@ -27,8 +27,10 @@
   import Listing from './Listing.svelte';
   import NoteEditor from './NoteEditor.svelte';
   import PathBar from './PathBar.svelte';
+  import Settings from './Settings.svelte';
   import TitleBar from './TitleBar.svelte';
   import TransferLine from './TransferLine.svelte';
+  import Viewer from './Viewer.svelte';
 
   /** Tiles per row in the grid; rows per page in the list. Both measured by those views. */
   let cols = $state(1);
@@ -72,6 +74,10 @@
       case 'cancel': return act.cancelTransfer();
       case 'help':
         ui.overlay = { kind: 'help' };
+        return;
+      case 'external': return item && act.openExternal(item);
+      case 'settings':
+        ui.overlay = { kind: 'settings' };
         return;
     }
   }
@@ -121,6 +127,12 @@
     {#key ui.overlay}
       <NoteEditor note={ui.overlay} />
     {/key}
+  {:else if ui.overlay?.kind === 'view'}
+    {#key ui.overlay}
+      <Viewer item={ui.overlay.item} />
+    {/key}
+  {:else if ui.overlay?.kind === 'settings'}
+    <Settings />
   {/if}
   {#if ui.dropping}
     <DropZone />

@@ -1,6 +1,6 @@
 // Claude — Date 11/03/2026
 import { describe, expect, it } from 'vitest';
-import { bar, baseMime, fit, hasThumb, human, isText, percent, sizeLabel, splitName } from './format';
+import { bar, baseMime, duration, fit, hasThumb, human, isText, percent, preview, scrubBar, sizeLabel, splitName, volumeBar, wantsPoster } from './format';
 import type { Item } from './types';
 
 const file = (over: Partial<Item>): Item => ({
@@ -49,11 +49,39 @@ describe('format', () => {
     expect(baseMime('text/markdown; charset=utf-8')).toBe('text/markdown');
     expect(isText(file({ mime: 'text/markdown; charset=utf-8' }))).toBe(true);
     expect(isText(file({ mime: 'application/json' }))).toBe(true);
-    expect(isText(file({ mime: 'text/plain', size: 2 << 20 }))).toBe(false);
+    // Big text opens too, read-only.
+    expect(isText(file({ mime: 'text/plain', size: 2 << 20 }))).toBe(true);
     expect(isText(file({ mime: 'image/png' }))).toBe(false);
     expect(hasThumb(file({ mime: 'image/jpeg' }))).toBe(true);
     expect(hasThumb(file({ mime: 'image/heic' }))).toBe(false);
     expect(hasThumb(file({ mime: 'image/png', blob: null }))).toBe(false);
     expect(sizeLabel(file({ kind: 'folder', count: 1 }))).toBe('1 item');
+    expect(wantsPoster(file({ mime: 'image/heic' }))).toBe(true);
+    expect(wantsPoster(file({ mime: 'video/quicktime' }))).toBe(true);
+    expect(wantsPoster(file({ mime: 'image/jpeg' }))).toBe(false);
+  });
+
+  it('picks a viewer', () => {
+    expect(preview(file({ mime: 'image/heic' }))).toBe('image');
+    expect(preview(file({ mime: 'audio/flac' }))).toBe('audio');
+    expect(preview(file({ mime: 'video/x-matroska' }))).toBe('video');
+    expect(preview(file({ mime: 'application/pdf' }))).toBe('pdf');
+    expect(preview(file({ mime: 'application/zip' }))).toBeNull();
+    expect(preview(file({ kind: 'folder', mime: null }))).toBeNull();
+  });
+
+  it('draws the player line', () => {
+    expect(duration(0)).toBe('0:00');
+    expect(duration(92.7)).toBe('1:32');
+    expect(duration(3723)).toBe('1:02:03');
+    expect(duration(NaN)).toBe('-:--');
+    expect(duration(Infinity)).toBe('-:--');
+    expect(scrubBar(25, 50, 100, 8)).toBe('██▒▒░░░░');
+    expect(scrubBar(0, 0, 0, 4)).toBe('░░░░');
+    expect(scrubBar(100, 80, 100, 4)).toBe('████');
+    expect(volumeBar(1, false)).toBe('▮▮▮▮');
+    expect(volumeBar(0.3, false)).toBe('▮▯▯▯');
+    expect(volumeBar(0.01, false)).toBe('▮▯▯▯');
+    expect(volumeBar(1, true)).toBe('muted');
   });
 });

@@ -3,12 +3,16 @@
 // `invoke` of a command in src-tauri/src/commands.rs, and every event comes
 // from there too. In a plain browser (`npm run dev`), an in-memory fake serves
 // the same interface (mock.ts), so the UI can be worked on without the app.
+//
+// Photos, audio, video and PDFs aren't passed through here: `streamUrl` gives
+// a loopback address that <img>, <audio>, <video> and <iframe> load directly.
 
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import type { Clash, Hit, Id, Listing, NoteTarget, Status, SyncStatus, Transfer, UploadPlan } from './types';
+import type { CacheInfo, Clash, Hit, Id, Listing, NoteTarget, NoteText, Status, SyncStatus, Transfer, UploadPlan } from './types';
 
 export type Unlisten = () => void;
 
@@ -30,13 +34,25 @@ export interface Backend {
   download(id: Id, path: string): Promise<number>;
   cancel(transfer: number): Promise<void>;
   transfers(): Promise<Transfer[]>;
-  noteRead(id: Id): Promise<string>;
+  noteRead(id: Id): Promise<NoteText>;
   /** Returns the note's entry id, new or not. */
   noteSave(target: NoteTarget, text: string): Promise<Id>;
   syncNow(): Promise<void>;
+  /** Where the page can load a file's bytes: images, audio, video, PDFs. */
+  streamUrl(id: Id): Promise<string>;
+  /** Play a file in IINA, VLC or QuickTime. Returns the app used. */
+  openExternal(id: Id): Promise<string>;
+  cacheInfo(): Promise<CacheInfo>;
+  cacheSetCap(bytes: number): Promise<CacheInfo>;
+  cacheClear(): Promise<CacheInfo>;
+  /** Keep a thumbnail drawn here. Returns whether other devices get it too. */
+  thumbSave(blob: string, jpeg: Uint8Array): Promise<boolean>;
 
-  /** A URL an `<img>` can load the blob's thumbnail from. */
-  thumbUrl(blob: string): string;
+  /** A URL an `<img>` can load the blob's thumbnail from. `v` busts a cached miss. */
+  thumbUrl(blob: string, v?: number): string;
+  /** The window fills the screen, or stops. Returns whether it now does. */
+  toggleFullscreen(): Promise<boolean>;
+  setFullscreen(on: boolean): Promise<void>;
   pickFiles(): Promise<string[] | null>;
   pickSavePath(name: string): Promise<string | null>;
   onIndexChanged(cb: () => void): Promise<Unlisten>;
@@ -60,11 +76,24 @@ function tauri(): Backend {
     download: (id, path) => invoke<number>('download', { id, path }),
     cancel: (transfer) => invoke<void>('cancel', { transfer }),
     transfers: () => invoke<Transfer[]>('transfers'),
-    noteRead: (id) => invoke<string>('note_read', { id }),
+    noteRead: (id) => invoke<NoteText>('note_read', { id }),
     noteSave: (target, text) => invoke<Id>('note_save', { target, text }),
     syncNow: () => invoke<void>('sync_now'),
+    streamUrl: (id) => invoke<string>('stream_url', { id }),
+    openExternal: (id) => invoke<string>('open_external', { id }),
+    cacheInfo: () => invoke<CacheInfo>('cache_info'),
+    cacheSetCap: (bytes) => invoke<CacheInfo>('cache_set_cap', { bytes }),
+    cacheClear: () => invoke<CacheInfo>('cache_clear'),
+    thumbSave: (blob, jpeg) => invoke<boolean>('thumb_save', { blob, jpeg: Array.from(jpeg) }),
 
-    thumbUrl: (blob) => convertFileSrc(blob, 'thumb'),
+    thumbUrl: (blob, v) => convertFileSrc(blob, 'thumb') + (v ? `?v=${v}` : ''),
+    toggleFullscreen: async () => {
+      const w = getCurrentWindow();
+      const on = !(await w.isFullscreen());
+      await w.setFullscreen(on);
+      return on;
+    },
+    setFullscreen: (on) => getCurrentWindow().setFullscreen(on),
     pickFiles: async () => (await open({ multiple: true, directory: false })) ?? null,
     pickSavePath: (name) => save({ defaultPath: name }),
     onIndexChanged: (cb) => listen('index-changed', () => cb()),

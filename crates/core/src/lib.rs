@@ -6,10 +6,12 @@
 // Built so far: the store key layout and the swiftSearch client (M0); chunked,
 // resumable blobs with the local upload queue (M1); the shared index (M2):
 // the op model and merge, the local Db, local changes, and sync between
-// devices; and photo thumbnails and search for the app (M3). The cache and
-// the stream server come next.
+// devices; photo thumbnails and search for the app (M3); and the chunk cache
+// and the loopback stream server that the app's viewer and player read
+// through (M4).
 
 pub mod blob;
+pub mod cache;
 pub mod db;
 pub mod error;
 pub mod index;
@@ -17,6 +19,7 @@ pub mod keys;
 pub mod mime;
 pub mod oplog;
 pub mod remote;
+pub mod stream;
 pub mod sync;
 pub mod thumb;
 

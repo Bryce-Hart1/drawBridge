@@ -3,7 +3,7 @@
 // what changed; anything that fails is reported in the bottom line.
 
 import { api } from './api';
-import { errorText, isText, plural, splitName } from './format';
+import { errorText, isText, plural, preview, splitName } from './format';
 import { current, ui } from './state.svelte';
 import type { Clash, Id, Item } from './types';
 
@@ -46,13 +46,28 @@ export function reload() {
   return load(ui.listing.dir, current()?.id ?? '');
 }
 
+/** Open a folder, a note, or a file in the viewer; anything else is saved as a copy. */
 export function open(item: Item) {
   if (item.kind === 'folder') return load(item.id);
   if (isText(item)) {
-    ui.overlay = { kind: 'note', id: item.id, parent: ui.listing.dir, name: item.name };
+    ui.overlay = { kind: 'note', id: item.id, parent: ui.listing.dir, name: item.name, size: item.size ?? 0 };
+    return;
+  }
+  if (preview(item)) {
+    ui.overlay = { kind: 'view', item };
     return;
   }
   return saveAs(item);
+}
+
+/** Play a file in IINA, VLC or QuickTime. */
+export async function openExternal(item: Item) {
+  if (item.kind !== 'file') return;
+  try {
+    say(`opening ${item.name} in ${await api.openExternal(item.id)}`);
+  } catch (e) {
+    fail(e);
+  }
 }
 
 /** Up one folder, with the one just left selected. */
@@ -151,7 +166,7 @@ export async function pickAndUpload() {
   }
 }
 
-export async function saveAs(item: Item) {
+export async function saveAs(item: Pick<Item, 'id' | 'name'>) {
   try {
     const path = await api.pickSavePath(item.name);
     if (path) await api.download(item.id, path);
