@@ -52,6 +52,8 @@ export interface SyncStatus {
   message: string | null;
   /** The key can read but not write. */
   readOnly: boolean;
+  /** Changes made here that the store doesn't have yet. */
+  pending: number;
 }
 
 export interface Status {
@@ -73,7 +75,8 @@ export interface UploadPlan {
   clashes: string[];
 }
 
-export type TransferState = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
+/** `waiting`: the store couldn't be reached; it goes again once it can. */
+export type TransferState = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'stopped';
 
 export interface Transfer {
   id: number;

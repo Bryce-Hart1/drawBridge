@@ -15,7 +15,7 @@ use std::time::Duration;
 use drawbridge_core::cache::Cache;
 use drawbridge_core::stream::{self as streaming, StreamConfig};
 use drawbridge_core::sync::{self, SyncOptions};
-use drawbridge_core::{Db, Error, Remote, View, remote};
+use drawbridge_core::{Db, Remote, View};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
@@ -50,6 +50,8 @@ pub struct SyncStatus {
     pub last_ok_ms: Option<u64>,
     pub message: Option<String>,
     pub read_only: bool,
+    /// Changes made here that the store doesn't have yet.
+    pub pending: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -182,7 +184,20 @@ impl App {
     /// A change made on this device: show it now, push it soon.
     pub fn changed_here(&self) {
         self.index_changed();
+        self.count_pending();
         self.syncer.soon();
+    }
+
+    /// The store couldn't be reached on the last try.
+    pub fn offline(&self) -> bool {
+        lock(&self.sync).state == SyncState::Offline
+    }
+
+    fn count_pending(&self) {
+        let pending = self.db().pending_changes().unwrap_or(0);
+        if lock(&self.sync).pending != pending {
+            self.set_sync(|s| s.pending = pending);
+        }
     }
 
     fn set_sync(&self, change: impl FnOnce(&mut SyncStatus)) {
@@ -215,18 +230,24 @@ impl App {
                 if report.pulled > 0 || report.bootstrapped > 0 {
                     self.index_changed();
                 }
+                let pending = db.pending_changes().unwrap_or(0);
                 self.set_sync(|s| {
                     s.state = SyncState::Idle;
                     s.last_ok_ms = Some(now_ms());
                     s.message = None;
                     s.read_only = report.read_only;
+                    s.pending = pending;
                 });
+                // The store answers: uploads waiting for it carry on.
+                self.transfers.back_online();
             }
             Err(e) => {
-                let offline = matches!(e, Error::Remote(remote::Error::Transport(_)));
+                let offline = e.unreachable();
+                let pending = db.pending_changes().unwrap_or(0);
                 self.set_sync(|s| {
                     s.state = if offline { SyncState::Offline } else { SyncState::Error };
                     s.message = Some(e.to_string());
+                    s.pending = pending;
                 });
             }
         }

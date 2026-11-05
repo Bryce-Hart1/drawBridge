@@ -2,9 +2,9 @@
 // Integration harness: a real swiftSearch in a throwaway store, with one write
 // key and one read key, killed when the test ends.
 //
-// The binary comes from SWIFTSEARCH_BIN, or the sibling checkout's build
-// folder. Build it first (`cmake -B build && cmake --build build -j` in
-// multithread_Search/swiftSearch).
+// The binary comes from SWIFTSEARCH_BIN, or the build folder of the checkout
+// in ~/Developer/swiftSearch (or the older sibling checkout). Build it first
+// (`cmake -B build && cmake --build build -j` there).
 //
 // The port is picked here rather than with `--port 0`: swiftSearch prints the
 // port it chose in its banner, but stdout is block-buffered when it isn't a
@@ -77,10 +77,17 @@ impl Drop for Server {
 }
 
 fn binary() -> PathBuf {
-    let bin = std::env::var_os("SWIFTSEARCH_BIN").map(PathBuf::from).unwrap_or_else(|| {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../multithread_Search/swiftSearch/build/bin/swiftSearch")
-    });
+    // SWIFTSEARCH_BIN, else the first build found: ~/Developer/swiftSearch,
+    // where the checkout lives now, then the old sibling checkout.
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let candidates = [
+        home.join("Developer/swiftSearch/build/bin/swiftSearch"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../multithread_Search/swiftSearch/build/bin/swiftSearch"),
+    ];
+    let bin = std::env::var_os("SWIFTSEARCH_BIN")
+        .map(PathBuf::from)
+        .or_else(|| candidates.iter().find(|p| p.is_file()).cloned())
+        .unwrap_or_else(|| candidates[0].clone());
     assert!(
         bin.is_file(),
         "no swiftSearch binary at {}: build it, or set SWIFTSEARCH_BIN",

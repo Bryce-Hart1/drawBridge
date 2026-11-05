@@ -109,7 +109,11 @@
       {#if !playable || broken}
         <div class="cant">
           <pre class="glyph">{glyph(item)}</pre>
-          <p>can't {media ? 'play' : 'show'} {mime || 'this'} here</p>
+          {#if broken && ui.status?.sync.state === 'offline'}
+            <p>the store can't be reached right now</p>
+          {:else}
+            <p>can't {media ? 'play' : 'show'} {mime || 'this'} here</p>
+          {/if}
           {#if media}
             <p class="dim">
               <span class="key">e</span> opens it in IINA, VLC or QuickTime · <span class="key">o</span> saves a copy

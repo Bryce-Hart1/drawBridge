@@ -1,7 +1,8 @@
 /* Claude — Date 11/03/2026
    The terminal look. Everything sits on a character grid: a cell is 1ch wide
    and --cell-h tall, so rows, frames and columns line up the way a TUI's do.
-   Strict monochrome: ink, paper and two grays, swapped for dark mode.
+   Strict monochrome: ink, paper and two grays, swapped for dark mode. The
+   only colour in the chrome is code's syntax colouring in the editor.
 
    The font is the system's monospace (SF Mono on macOS). It carries the whole
    box-drawing and block range (┌ ─ █ ░ ▸ ●), so nothing falls back to another
@@ -15,6 +16,13 @@
   --faint: #d6d6d2;
   /* Room above the outer frame: on macOS the traffic lights sit on its top border. */
   --top: 12px;
+  /* Syntax colours (lib/syntax.ts), muted to sit with the gray chrome. */
+  --syn-kw: #8b3fc9;
+  --syn-type: #0f7b6c;
+  --syn-str: #3f7d20;
+  --syn-num: #b35a00;
+  --syn-fn: #1f5fbf;
+  --syn-pre: #a0418c;
   color-scheme: light dark;
 }
 
@@ -24,6 +32,12 @@
     --ink: #e2e2e2;
     --dim: #8a8a8a;
     --faint: #2b2b2b;
+    --syn-kw: #c79bf2;
+    --syn-type: #6fcfc0;
+    --syn-str: #a9d48a;
+    --syn-num: #f0b37e;
+    --syn-fn: #8ab4f8;
+    --syn-pre: #e59ad6;
   }
 }
 
@@ -223,3 +237,13 @@ pre {
   width: 100%;
   height: 100%;
 }
+
+/* ── syntax colours ─────────────────────────────────────── */
+
+.t-kw { color: var(--syn-kw); }
+.t-type { color: var(--syn-type); }
+.t-str { color: var(--syn-str); }
+.t-num { color: var(--syn-num); }
+.t-fn { color: var(--syn-fn); }
+.t-pre { color: var(--syn-pre); }
+.t-com { color: var(--dim); font-style: italic; }

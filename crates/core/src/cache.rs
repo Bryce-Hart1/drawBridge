@@ -12,6 +12,11 @@
 //
 // Callers that want the same chunk at the same time share one fetch: the
 // first one fetches, the rest wait for it and then read the file.
+//
+// Reading ahead follows where the player is (`focus`): the chunk it's in, then
+// the next. A seek somewhere else in the same file cancels read-ahead for the
+// places it left, so a few quick jumps don't leave whole chunks downloading
+// for nobody, sharing the home server's upload with the bytes that matter.
 
 use std::collections::HashMap;
 use std::io::{self, SeekFrom};
@@ -21,15 +26,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio::sync::Semaphore;
+use tokio::task::AbortHandle;
 
 use crate::blob::{self, Manifest};
 use crate::error::Error;
 use crate::keys;
 use crate::remote::Remote;
-
-/// Background read-ahead fetches in flight at once, across every blob.
-const PREFETCH: usize = 2;
 
 type Slot = (String, u32);
 
@@ -38,7 +40,8 @@ pub struct Cache {
     state: Mutex<State>,
     /// One lock per chunk being fetched; a second caller waits on it.
     fetching: Mutex<HashMap<Slot, Arc<tokio::sync::Mutex<()>>>>,
-    prefetch: Arc<Semaphore>,
+    /// The read-ahead running for each blob: the chunk it started at.
+    ahead: Mutex<HashMap<String, (u32, AbortHandle)>>,
 }
 
 struct State {
@@ -91,7 +94,7 @@ impl Cache {
             dir: dir.to_owned(),
             state: Mutex::new(State { cap, total, chunks }),
             fetching: Mutex::default(),
-            prefetch: Arc::new(Semaphore::new(PREFETCH)),
+            ahead: Mutex::default(),
         };
         cache.evict(&mut cache.state());
         Ok(Arc::new(cache))
@@ -176,21 +179,34 @@ impl Cache {
         result
     }
 
-    /// Fetch chunk `index` of `m` in the background, unless it's cached, past
-    /// the end, or the read-ahead fetches are all busy. Errors are dropped:
-    /// whoever reads the chunk later fetches it again and sees them.
-    pub fn prefetch(self: &Arc<Self>, remote: Arc<Remote>, m: Arc<Manifest>, index: u32) {
-        if index as usize >= m.chunks.len() || self.has(&m.blob, index) {
+    /// The player is reading chunk `index` of `m`: have it and the one after
+    /// it cached, in that order, in the background. Read-ahead this blob had
+    /// going from anywhere else is cancelled. Errors are dropped: whoever
+    /// reads the chunk later fetches it again and sees them.
+    pub fn focus(self: &Arc<Self>, remote: Arc<Remote>, m: Arc<Manifest>, index: u32) {
+        let wanted: Vec<u32> =
+            (index..=index.saturating_add(1)).filter(|&i| (i as usize) < m.chunks.len() && !self.has(&m.blob, i)).collect();
+        let mut ahead = self.ahead.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, task)) = ahead.get(&m.blob) {
+            if *at == index && !task.is_finished() {
+                return; // already on it
+            }
+            task.abort();
+        }
+        if wanted.is_empty() {
+            ahead.remove(&m.blob);
             return;
         }
-        let Ok(permit) = self.prefetch.clone().try_acquire_owned() else {
-            return;
-        };
         let cache = self.clone();
-        tokio::spawn(async move {
-            let _permit = permit;
-            let _ = cache.get(&remote, &m, index).await;
+        let blob = m.blob.clone();
+        let task = tokio::spawn(async move {
+            for i in wanted {
+                if cache.get(&remote, &m, i).await.is_err() {
+                    break;
+                }
+            }
         });
+        ahead.insert(blob, (index, task.abort_handle()));
     }
 
     async fn store(&self, blob: &str, index: u32, bytes: &[u8]) -> Result<(), Error> {

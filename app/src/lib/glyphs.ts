@@ -66,11 +66,13 @@ export function glyph(item: Item): string {
 }
 
 /** The setup screen's drawing. */
+// 17 cells of wall, centred on cell 10: the towers, the gate's bars and the
+// footings all mirror about it.
 export const LOGO = [
   '  ▟▙   ▟▙   ▟▙   ▟▙  ',
-  '  ████████████████  ',
-  '  ████▀▀▀▀▀▀▀▀████  ',
-  '  ███ ┃ ┃ ┃ ┃ ┃███  ',
-  '  ███ ┃ ┃ ┃ ┃ ┃███  ',
-  '══╧══╧═╧═╧═╧═╧══╧══',
+  '  █████████████████  ',
+  '  ████▀▀▀▀▀▀▀▀▀████  ',
+  '  ███ ┃ ┃ ┃ ┃ ┃ ███  ',
+  '  ███ ┃ ┃ ┃ ┃ ┃ ███  ',
+  '══╧═══╧═╧═╧═╧═╧═══╧══',
 ].join('\n');

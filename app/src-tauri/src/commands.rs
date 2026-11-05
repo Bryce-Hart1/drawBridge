@@ -56,7 +56,7 @@ impl From<Error> for CmdError {
             Error::NoDevice => "not_connected",
             Error::Remote(remote::Error::Unauthorized) => "unauthorized",
             Error::Remote(remote::Error::Forbidden) => "forbidden",
-            Error::Remote(remote::Error::Transport(_)) => "offline",
+            e if e.unreachable() => "offline",
             Error::Remote(_) => "remote",
             _ => "other",
         };

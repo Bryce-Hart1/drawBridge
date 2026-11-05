@@ -8,7 +8,8 @@
 // it straight away, as the app would.
 //
 // Add `?setup` to the URL to start at the setup screen. On it, the key `bad`
-// is rejected and anything else connects.
+// is rejected and anything else connects. Add `?offline` to start with the
+// store unreachable: changes waiting, and an upload waiting for it.
 
 import type { Backend, DropEvent, Unlisten } from './api';
 import type { CacheInfo, CmdError, Hit, Id, Item, Listing, NoteTarget, Status, SyncStatus, Transfer } from './types';
@@ -165,7 +166,15 @@ function queue(dir: 'up' | 'down', name: string, total: number, done: () => void
   return t.id;
 }
 
-let sync: SyncStatus = { state: 'idle', lastOkMs: Date.now(), message: null, readOnly: false };
+const offline = location.search.includes('offline');
+let sync: SyncStatus = offline
+  ? { state: 'offline', lastOkMs: Date.now() - 600_000, message: 'could not reach the store', readOnly: false, pending: 3 }
+  : { state: 'idle', lastOkMs: Date.now(), message: null, readOnly: false, pending: 0 };
+if (offline) {
+  // An upload the store dropped part way, waiting for it to come back.
+  const t: Transfer = { id: nextTransfer++, dir: 'up', name: 'holiday.mp4', done: 41_943_040, total: 143_000_000, state: 'waiting', error: null };
+  transfers.set(t.id, t);
+}
 let connected = !location.search.includes('setup');
 let device: string | null = connected ? 'laptop' : null;
 
@@ -369,10 +378,11 @@ export function mockBackend(): Backend {
       return id;
     },
     async syncNow() {
+      const was = sync.state;
       sync = { ...sync, state: 'syncing' };
       emit('sync-status', sync);
       await sleep(900);
-      sync = { ...sync, state: 'idle', lastOkMs: Date.now() };
+      sync = offline && was === 'offline' ? { ...sync, state: 'offline' } : { ...sync, state: 'idle', lastOkMs: Date.now(), pending: 0 };
       emit('sync-status', sync);
     },
 

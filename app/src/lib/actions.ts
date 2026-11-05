@@ -195,7 +195,9 @@ export async function syncNow() {
 }
 
 export async function cancelTransfer() {
-  const running = Object.values(ui.transfers).find((t) => t.state === 'running');
+  // The one running, or else the one waiting for the store.
+  const all = Object.values(ui.transfers);
+  const running = all.find((t) => t.state === 'running') ?? all.find((t) => t.state === 'waiting');
   if (!running) return;
   try {
     await api.cancel(running.id);

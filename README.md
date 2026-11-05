@@ -6,7 +6,7 @@ from any of your devices. drawBridge has no server of its own. The Rust core in 
 app talks to swiftSearch through castle+ over HTTPS, and directly over loopback
 in development.
 
-**Status: M4.** Done so far:
+**Status: M5.** Done so far:
 - the swiftSearch client
 - chunked, resumable blobs, with a local upload queue in SQLite
 - the shared folder tree: each device writes its changes to its own op log in
@@ -20,9 +20,11 @@ in development.
 - streaming and previews: photos full size, audio and video that play and seek
   without downloading the whole file, PDFs, code as text, video posters and
   HEIC thumbnails, through a capped on-disk cache
+- running against the real server over HTTPS (swiftSearch behind castle+ and a
+  Cloudflare Tunnel), and working offline: changes and uploads wait for the
+  store and carry on by themselves when it's back
 
-Still to come: deployment through castle+. What
-drawBridge writes into the store is specified in [docs/FORMAT.md](docs/FORMAT.md).
+What drawBridge writes into the store is specified in [docs/FORMAT.md](docs/FORMAT.md).
 
 ## Layout
 
@@ -102,6 +104,23 @@ builds keep the key in the macOS Keychain; debug builds keep it in
 `dev-keys.json` in the app's data folder, so rebuilding doesn't ask for
 Keychain access each time.
 
+To install it as an ordinary app, build a release and copy it to Applications:
+
+```bash
+npx tauri build --bundles app
+```
+
+```bash
+cp -R ../target/release/bundle/macos/drawBridge.app /Applications/
+```
+
+The release build keeps the key in the Keychain rather than in `dev-keys.json`,
+so the first launch asks to connect again; the folders and settings are the
+same ones the dev build used. The app is signed ad hoc, not with a Developer
+ID, so after each rebuild macOS may ask once whether it may read its Keychain
+item (Always Allow). Picking straight from Photos in the upload panel needs
+the bundled app: it's what can ask for access to the Photos library.
+
 `npm run dev` on its own serves the UI to a plain browser at
 http://127.0.0.1:1420 with a fake backend (`app/src/lib/mock.ts`), for working on
 the look without a store. Add `?setup` for the setup screen.
@@ -125,13 +144,71 @@ opens the settings to change the cap or clear the cache. A video or HEIC photo
 gets its thumbnail the first time it's selected: the window draws one from the
 file and stores it for every device.
 
+## Deploying
+
+In production the store is swiftSearch V2 on the home server, behind castle+,
+reached through a Cloudflare Tunnel:
+
+```
+app ──HTTPS──▶ Cloudflare ──tunnel──▶ cloudflared ──▶ castle+ :8443 ──▶ swiftSearch 127.0.0.1:9201
+```
+
+**castle+ route.** No `auth`: castle+ would take the `Authorization` header
+for itself, and swiftSearch checks each device's own key. Only blob reads and
+writes and the health check get through:
+
+```ini
+[vault]
+host     = vault.brycehart.dev
+backend  = 127.0.0.1:9201
+max_body = 64M
+allow    = /v1/blobs/ /healthz
+```
+
+**Cloudflare.** The tunnel's public hostname points at `https://127.0.0.1:8443`.
+It needs three settings:
+- **No TLS Verify**, because castle+'s certificate is self-signed. That hop
+  never leaves the server.
+- **Disable Chunked Encoding**, or uploads reach castle+ chunked and get 501.
+- **A Cache Rule that bypasses the cache** for the hostname.
+
+**A device.** Each device gets its own key, made on the server (add `--access read`
+for one that only follows):
+
+```bash
+doas su -s /bin/sh castle -c 'cd /var/lib/swiftsearch-logs && /opt/swiftsearch/swiftSearch key add --store /var/lib/swiftsearch --name <device>'
+```
+
+`key list` shows the keys by id and name, and `key remove <id>` revokes one
+within a second. Then the device connects to `https://vault.brycehart.dev` with
+its key.
+
+**Checking it.** [scripts/check_vault.sh](scripts/check_vault.sh) runs the
+whole path from outside. It checks:
+- swiftSearch's own 401 when the key is missing, and 403 when a read key writes
+- a byte-for-byte round trip of a chunk, Range, and conditional reads
+- that nothing is cached on the way
+- that admin, box, unbox and prepare are refused at the edge
+- the 64 MiB cap
+
+```bash
+H=https://vault.brycehart.dev RW=<write key> RO=<read key> scripts/check_vault.sh
+```
+
+**Offline.** When the store can't be reached:
+- The title bar shows `○ offline` and how many changes wait to be sent.
+- Uploads and downloads pause at `⏸ waiting for the store` and pick up from
+  their last chunk.
+- While the window is on screen, the app retries after 5, 10, 20 and 40 s, then
+  every minute.
+
 ## Tests
 
 The integration tests start a real swiftSearch in a throwaway store. Build it
-first:
+first, in your swiftSearch checkout:
 
 ```bash
-cmake -S ../multithread_Search/swiftSearch -B ../multithread_Search/swiftSearch/build && cmake --build ../multithread_Search/swiftSearch/build -j
+cmake -S ~/Developer/swiftSearch -B ~/Developer/swiftSearch/build && cmake --build ~/Developer/swiftSearch/build -j
 ```
 
 ```bash
@@ -145,5 +222,6 @@ npm run check && npm test
 ```
 
 The tests look for the binary at
-`../multithread_Search/swiftSearch/build/bin/swiftSearch`. Set `SWIFTSEARCH_BIN` to
-use one somewhere else.
+`~/Developer/swiftSearch/build/bin/swiftSearch`, then at the older sibling
+checkout `../multithread_Search/swiftSearch`. Set `SWIFTSEARCH_BIN` to use one
+somewhere else.

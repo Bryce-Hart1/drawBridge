@@ -37,6 +37,14 @@ pub enum Error {
     NoDevice,
 }
 
+impl Error {
+    /// The store couldn't be reached (see `remote::Error::unreachable`): worth
+    /// waiting for, not reporting as a failure.
+    pub fn unreachable(&self) -> bool {
+        matches!(self, Error::Remote(e) if e.unreachable())
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

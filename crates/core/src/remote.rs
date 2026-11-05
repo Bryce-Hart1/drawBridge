@@ -15,6 +15,13 @@
 // - A 503 (swiftSearch's queue is full) or a connection dropped under us is
 //   worth retrying. Every call here is idempotent, so retrying is safe: a PUT of
 //   the same bytes to the same key stores the same value.
+// - In front of castle+ there may be a Cloudflare Tunnel. Its edge answers for
+//   an origin it can't reach (502, 504, 520-524, 530) with an HTML page, and may
+//   rate-limit (429) or block (403) with one too. Those are retried where it
+//   helps, summarized rather than shown whole, and never mistaken for
+//   swiftSearch's own JSON answers: a Cloudflare 403 is not "your key lacks
+//   permission". `Error::unreachable` tells "can't get there" apart from "the
+//   store said no", which the app uses to wait rather than fail.
 
 use std::fmt;
 use std::future::Future;
@@ -156,7 +163,18 @@ pub enum Error {
 impl Error {
     fn retryable(&self) -> bool {
         match self {
-            Error::Status { status, .. } => *status == 503,
+            Error::Status { status, .. } => matches!(status, 429 | 502 | 503 | 504 | 520..=524),
+            Error::Transport(e) => !e.is_builder(),
+            _ => false,
+        }
+    }
+
+    /// The store couldn't be reached: no connection, or a gateway in front of
+    /// it (castle+, Cloudflare) saying the server behind it didn't answer.
+    /// Worth waiting out; the store never saw the request.
+    pub fn unreachable(&self) -> bool {
+        match self {
+            Error::Status { status, .. } => matches!(status, 502 | 504 | 520..=524 | 530),
             Error::Transport(e) => !e.is_builder(),
             _ => false,
         }
@@ -174,6 +192,7 @@ impl fmt::Display for Error {
             Error::RangeNotSatisfiable { size } => {
                 write!(f, "range past the end of a {size}-byte value (416)")
             }
+            Error::Status { status, code, message } if code.is_empty() => write!(f, "{message} ({status})"),
             Error::Status { status, code, message } => write!(f, "{message} ({status} {code})"),
             Error::Transport(e) => write!(f, "could not reach the store: {e}"),
             Error::Protocol(why) => write!(f, "unexpected answer from the store: {why}"),
@@ -238,6 +257,8 @@ impl Remote {
             HeaderValue::from_str(&format!("Bearer {access_key}")).map_err(|_| Error::AccessKey)?;
         auth.set_sensitive(true);
         let http = reqwest::Client::builder()
+            // A named client, so an edge like Cloudflare's doesn't take it for a bot.
+            .user_agent(concat!("drawBridge/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(10))
             // swiftSearch drops a client that reads nothing for 20 s; this is
             // the same courtesy the other way, for a server that has stalled.
@@ -514,18 +535,11 @@ fn parse_content_range(v: &str) -> Option<(u64, u64, u64)> {
 
 /// Turn an error status into an `Error`. swiftSearch's error bodies are
 /// `{"error": sentence, "code": stable_name, "status": n}`; castle+ answers some
-/// statuses itself with a plain-text body, which lands in `message`.
+/// statuses itself with a plain-text body, and Cloudflare with an HTML page.
 async fn fail(resp: Response) -> Error {
-    #[derive(Deserialize)]
-    struct Body {
-        error: String,
-        code: String,
-    }
-
     let status = resp.status();
     match status {
         StatusCode::UNAUTHORIZED => return Error::Unauthorized,
-        StatusCode::FORBIDDEN => return Error::Forbidden,
         StatusCode::PAYLOAD_TOO_LARGE => return Error::TooLarge,
         StatusCode::RANGE_NOT_SATISFIABLE => {
             // `Content-Range: bytes */size`.
@@ -540,14 +554,37 @@ async fn fail(resp: Response) -> Error {
         _ => {}
     }
     let text = resp.bytes().await.unwrap_or_default();
-    match serde_json::from_slice::<Body>(&text) {
-        Ok(b) => Error::Status { status: status.as_u16(), code: b.code, message: b.error },
-        Err(_) => Error::Status {
-            status: status.as_u16(),
-            code: String::new(),
-            message: String::from_utf8_lossy(&text).trim().to_owned(),
-        },
+    from_body(status, &text)
+}
+
+/// An error status and its body, as an `Error`. Only swiftSearch's own JSON
+/// 403 means the key lacks permission; anything else is told apart by who said it.
+fn from_body(status: StatusCode, body: &[u8]) -> Error {
+    #[derive(Deserialize)]
+    struct Body {
+        error: String,
+        code: String,
     }
+
+    if let Ok(b) = serde_json::from_slice::<Body>(body) {
+        if status == StatusCode::FORBIDDEN {
+            return Error::Forbidden;
+        }
+        return Error::Status { status: status.as_u16(), code: b.code, message: b.error };
+    }
+    let text = String::from_utf8_lossy(body);
+    let text = text.trim();
+    let html = text.starts_with('<') || text.to_ascii_lowercase().contains("<html");
+    let message = match status.as_u16() {
+        520..=524 | 530 => "the server behind the store's gateway didn't answer".to_owned(),
+        _ if html => {
+            let reason = status.canonical_reason().unwrap_or("error").to_ascii_lowercase();
+            format!("the store's gateway answered: {reason}")
+        }
+        // castle+'s plain-text answers are a line; keep anything else short.
+        _ => text.chars().take(200).collect(),
+    };
+    Error::Status { status: status.as_u16(), code: String::new(), message }
 }
 
 #[cfg(test)]
@@ -608,6 +645,31 @@ mod tests {
         assert_eq!(Kind::parse("IMG"), Kind::Img);
         assert_eq!(Kind::parse("big_int"), Kind::Bin);
         assert_eq!(Kind::parse(""), Kind::Bin);
+    }
+
+    #[test]
+    fn errors_say_who_answered() {
+        let json = br#"{"error":"access key lacks write access","code":"forbidden","status":403}"#;
+        assert!(matches!(from_body(StatusCode::FORBIDDEN, json), Error::Forbidden));
+
+        let page = b"<!DOCTYPE html><html><head><title>Attention Required!</title></head></html>";
+        let e = from_body(StatusCode::FORBIDDEN, page);
+        assert!(matches!(&e, Error::Status { status: 403, .. }), "{e:?}");
+        assert_eq!(e.to_string(), "the store's gateway answered: forbidden (403)");
+        assert!(!e.unreachable());
+
+        let e = from_body(StatusCode::from_u16(522).unwrap(), page);
+        assert!(e.unreachable() && e.retryable());
+        assert!(e.to_string().starts_with("the server behind the store's gateway didn't answer"));
+
+        let e = from_body(StatusCode::BAD_GATEWAY, b"backend unavailable");
+        assert_eq!(e.to_string(), "backend unavailable (502)");
+        assert!(e.unreachable());
+
+        let busy = from_body(StatusCode::SERVICE_UNAVAILABLE, br#"{"error":"busy","code":"unavailable","status":503}"#);
+        assert!(busy.retryable() && !busy.unreachable(), "the store answered; it's just busy");
+        assert!(from_body(StatusCode::TOO_MANY_REQUESTS, b"").retryable());
+        assert!(!from_body(StatusCode::NOT_FOUND, b"no such route").retryable());
     }
 
     #[test]

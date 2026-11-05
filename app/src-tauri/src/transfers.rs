@@ -8,6 +8,12 @@
 // taken in the folders they're going into. With `OnClash::Ask` those clashes
 // come back to the UI instead of anything being queued, and it asks once:
 // replace, keep both, or skip.
+//
+// When the store can't be reached mid-transfer, the transfer isn't failed: it
+// goes back to the front of the queue as `waiting`, and the queue holds still
+// until a sync gets through or a backoff (5 s, 10 s … 60 s) runs out, then
+// tries again. An upload picks up from the last chunk the store took, since
+// the Db records every one.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
@@ -15,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use drawbridge_core::blob::{self, UploadOptions};
 use drawbridge_core::oplog::check_name;
@@ -28,6 +35,10 @@ use crate::state::{App, lock};
 /// Finished transfers kept for the UI to show.
 const KEEP: usize = 100;
 
+/// How long the queue holds still after each failure in a row to reach the
+/// store, unless a sync gets through first.
+const BACKOFF: [u64; 5] = [5, 10, 20, 40, 60];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Dir {
@@ -40,6 +51,8 @@ pub enum Dir {
 pub enum TransferState {
     Queued,
     Running,
+    /// The store couldn't be reached; it goes again once it can be.
+    Waiting,
     Done,
     Failed,
     Stopped,
@@ -68,6 +81,8 @@ pub enum Job {
 pub struct Transfers {
     inner: Mutex<Inner>,
     wake: Notify,
+    /// A sync just got through: stop waiting out the backoff.
+    online: Notify,
 }
 
 #[derive(Default)]
@@ -138,6 +153,28 @@ impl Transfers {
         }
     }
 
+    /// The store answers again: a queue holding still for it goes on now.
+    pub fn back_online(&self) {
+        self.online.notify_waiters();
+    }
+
+    /// Put a transfer the store couldn't take back at the front, to go first
+    /// when it can.
+    fn wait(&self, app: &App, id: u64, job: Job) {
+        lock(&self.inner).queue.push_front((id, job));
+        self.update(app, id, |t| t.state = TransferState::Waiting);
+    }
+
+    fn unwait(&self, app: &App) {
+        let waiting: Vec<u64> = {
+            let g = lock(&self.inner);
+            g.all.values().filter(|t| t.state == TransferState::Waiting).map(|t| t.id).collect()
+        };
+        for id in waiting {
+            self.update(app, id, |t| t.state = TransferState::Queued);
+        }
+    }
+
     fn next(&self) -> Option<(u64, Job, Arc<AtomicBool>)> {
         let mut g = lock(&self.inner);
         let (id, job) = g.queue.pop_front()?;
@@ -167,7 +204,13 @@ impl Transfers {
         g.stops.remove(&id);
         g.cancelled.remove(&id);
         while g.all.len() > KEEP {
-            let Some((&oldest, _)) = g.all.iter().find(|(_, t)| !matches!(t.state, TransferState::Queued | TransferState::Running)) else { break };
+            let Some((&oldest, _)) = g
+                .all
+                .iter()
+                .find(|(_, t)| !matches!(t.state, TransferState::Queued | TransferState::Running | TransferState::Waiting))
+            else {
+                break;
+            };
             g.all.remove(&oldest);
         }
     }
@@ -179,22 +222,43 @@ impl Transfers {
 
 pub fn spawn(app: Arc<App>) {
     tauri::async_runtime::spawn(async move {
+        let mut misses = 0;
         loop {
-            match app.transfers.next() {
-                Some((id, job, stop)) => run(&app, id, job, &stop).await,
-                None => app.transfers.wake.notified().await,
+            let Some((id, job, stop)) = app.transfers.next() else {
+                app.transfers.wake.notified().await;
+                continue;
+            };
+            let Some(job) = run(&app, id, job, &stop).await else {
+                misses = 0;
+                continue;
+            };
+            // Couldn't reach the store. Hold still, and let the sync loop find
+            // out when it's back.
+            let t = &app.transfers;
+            t.wait(&app, id, job);
+            app.syncer.now();
+            let pause = Duration::from_secs(BACKOFF[misses.min(BACKOFF.len() - 1)]);
+            misses += 1;
+            tokio::select! {
+                () = t.online.notified() => {}
+                () = tokio::time::sleep(pause) => {}
             }
+            t.unwait(&app);
         }
     });
 }
 
-async fn run(app: &App, id: u64, job: Job, stop: &AtomicBool) {
+/// Run one transfer to its end. Hands the job back if the store couldn't be
+/// reached, for the queue to try again later.
+async fn run(app: &App, id: u64, job: Job, stop: &AtomicBool) -> Option<Job> {
     let t = &app.transfers;
     if stop.load(Ordering::Relaxed) {
-        return t.finish(app, id, TransferState::Stopped, None);
+        t.finish(app, id, TransferState::Stopped, None);
+        return None;
     }
     let Some(remote) = app.remote() else {
-        return t.finish(app, id, TransferState::Failed, Some("not connected".into()));
+        t.finish(app, id, TransferState::Failed, Some("not connected".into()));
+        return None;
     };
     let db = app.db();
     t.update(app, id, |t| t.state = TransferState::Running);
@@ -227,8 +291,10 @@ async fn run(app: &App, id: u64, job: Job, stop: &AtomicBool) {
             }
             t.finish(app, id, TransferState::Stopped, None);
         }
+        Err(e) if e.unreachable() => return Some(job),
         Err(e) => t.finish(app, id, TransferState::Failed, Some(e.to_string())),
     }
+    None
 }
 
 /// Delete what a cancelled upload sent. Downloads clean up after themselves.

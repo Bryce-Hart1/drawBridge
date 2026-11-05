@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Claude — Date 11/04/2026
+     Merged by Tauri into the bundle's Info.plist. macOS shows this text when
+     drawBridge first asks to read the Photos library, which is what lets the
+     upload panel hand over photos picked from Photos rather than from a folder.
+     It only takes effect in the bundled app, not under `tauri dev`. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>drawBridge uploads the photos and videos you pick to your own storage.</string>
+</dict>
+</plist>

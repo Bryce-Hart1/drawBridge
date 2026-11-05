@@ -14,7 +14,8 @@
 // that isn't is fetched whole into the cache in the background, while this
 // answer gets just the bytes asked for (up to 1 MiB) straight from the store,
 // so a seek starts playing before the whole chunk has arrived. Each answer also
-// starts reading the next chunk ahead.
+// has the cache read ahead from there (`Cache::focus`): the rest of this chunk,
+// then the next, cancelling read-ahead left over from an earlier position.
 //
 // A request without a Range gets the whole blob, chunk by chunk through the
 // cache. That is how an <img> or a PDF loads.
@@ -314,23 +315,20 @@ async fn part(
     let (bytes, span) = if head {
         (Bytes::new(), span)
     } else if let Some(bytes) = cache.read(&m, span.index, span.start, span.end).await {
+        cache.focus(remote, m.clone(), span.index);
         (bytes, span)
     } else if m.chunk_len(span.index) <= QUICK {
         // Small enough to fetch whole now.
         let chunk = cache.get(&remote, &m, span.index).await?;
+        cache.focus(remote, m.clone(), span.index);
         (chunk.slice(span.start as usize..=span.end as usize), span)
     } else {
-        let whole_chunk = (cache.clone(), remote.clone(), m.clone());
-        tokio::spawn(async move {
-            let (cache, remote, m) = whole_chunk;
-            let _ = cache.get(&remote, &m, span.index).await;
-        });
+        // The whole chunk comes into the cache in the background; this answer
+        // gets the first MiB of it straight away.
+        cache.focus(remote.clone(), m.clone(), span.index);
         let quick = Span { end: span.end.min(span.start + QUICK - 1), ..span };
         (blob::read_span(&remote, &m, quick).await?, quick)
     };
-    if !head {
-        cache.prefetch(remote, m.clone(), span.index + 1);
-    }
     let base = span.index as u64 * m.chunk_size as u64;
     let mut r = Response::new(Body::from(bytes));
     *r.status_mut() = StatusCode::PARTIAL_CONTENT;

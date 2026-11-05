@@ -416,6 +416,19 @@ impl Db {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Changes made here that the store doesn't have yet: ops still in the
+    /// outbox, and ops in batches sealed but not pushed. What "3 changes
+    /// waiting" counts while the store can't be reached.
+    pub fn pending_changes(&self) -> Result<u64, Error> {
+        let conn = self.conn();
+        let n: i64 = conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM outbox) + (SELECT COALESCE(SUM(ops), 0) FROM batches)",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
     /// Every batch up to `seq` is in the store and `head.json` says so.
     pub fn mark_pushed(&self, seq: u64) -> Result<(), Error> {
         self.write(|tx| {
@@ -868,10 +881,13 @@ mod tests {
         assert!(ops[0].t < ops[1].t, "each op gets a later stamp");
         assert_eq!(db.view().unwrap().get("f").unwrap().name(), "b");
 
+        assert_eq!(db.pending_changes().unwrap(), 2, "two ops in the outbox");
         assert_eq!(db.seal_outbox().unwrap(), 1);
+        assert_eq!(db.pending_changes().unwrap(), 2, "now in a sealed batch, still not pushed");
         assert_eq!(db.seal_outbox().unwrap(), 0, "nothing new queued");
         db.commit(vec![("f".into(), Body::Delete)]).unwrap();
         assert_eq!(db.seal_outbox().unwrap(), 1);
+        assert_eq!(db.pending_changes().unwrap(), 3);
 
         let unpushed = db.unpushed().unwrap();
         assert_eq!(unpushed.iter().map(|u| (u.seq, u.ops)).collect::<Vec<_>>(), [(1, 2), (2, 1)]);
@@ -882,6 +898,7 @@ mod tests {
         assert_eq!(db.unpushed().unwrap().len(), 1);
         db.mark_pushed(2).unwrap();
         assert!(db.unpushed().unwrap().is_empty());
+        assert_eq!(db.pending_changes().unwrap(), 0);
         assert_eq!(db.published().unwrap(), Published { seq: 2, ckpt: 0 });
     }
 

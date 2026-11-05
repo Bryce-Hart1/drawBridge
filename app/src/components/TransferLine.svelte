@@ -1,12 +1,14 @@
 <script lang="ts">
   // Claude — Date 11/03/2026
   // One line for transfers: the one running, with a bar and its speed, and how
-  // many wait behind it. Otherwise, how the last one ended.
+  // many wait behind it; or the one waiting for the store to be reachable
+  // again. Otherwise, how the last one ended.
   import { bar, human, percent } from '../lib/format';
   import { ui } from '../lib/state.svelte';
 
   const all = $derived(Object.values(ui.transfers).sort((a, b) => a.id - b.id));
   const active = $derived(all.find((t) => t.state === 'running'));
+  const waiting = $derived(all.find((t) => t.state === 'waiting'));
   const queued = $derived(all.filter((t) => t.state === 'queued').length);
   const last = $derived(all.findLast((t) => t.state !== 'running' && t.state !== 'queued'));
 
@@ -30,7 +32,15 @@
 </script>
 
 <div class="row rule-top">
-  {#if active}
+  {#if waiting && !active}
+    <span>⏸</span>
+    <span>waiting for the store ·</span>
+    <span class="name ellipsis">{waiting.name}</span>
+    <span class="dim">{percent(waiting.done, waiting.total)} {waiting.dir === 'up' ? 'sent' : 'fetched'}</span>
+    <span class="spacer"></span>
+    {#if queued}<span class="dim">+{queued} queued</span>{/if}
+    <span class="dim">carries on when it's back · <span class="key">[x]</span> cancel</span>
+  {:else if active}
     <span>{active.dir === 'up' ? '↑' : '↓'}</span>
     <span class="name ellipsis">{active.name}</span>
     <span>{bar(active.done, active.total, 20)}</span>

@@ -4,7 +4,7 @@
   // the sync state on the right. On macOS it is also the title bar: drag it to
   // move the window.
   import { askDisconnect } from '../lib/actions';
-  import { clock } from '../lib/format';
+  import { clock, plural } from '../lib/format';
   import { ui } from '../lib/state.svelte';
 
   const SPIN = ['|', '/', '-', '\\'];
@@ -21,11 +21,13 @@
     const s = ui.status?.sync;
     if (!s) return '';
     const ro = s.readOnly ? ' · read-only' : '';
+    // Changes made here the store doesn't have yet: they go with the next sync that gets through.
+    const waiting = s.pending ? ` · ${plural(s.pending, 'change')} waiting` : '';
     switch (s.state) {
-      case 'syncing': return `${SPIN[frame]} syncing${ro}`;
-      case 'offline': return `○ offline${ro}`;
-      case 'error': return `✕ sync failed${ro}`;
-      default: return `${s.lastOkMs ? `● synced ${clock(s.lastOkMs)}` : '● ready'}${ro}`;
+      case 'syncing': return `${SPIN[frame]} syncing${waiting}${ro}`;
+      case 'offline': return `○ offline${waiting}${ro}`;
+      case 'error': return `✕ sync failed${waiting}${ro}`;
+      default: return `${s.lastOkMs ? `● synced ${clock(s.lastOkMs)}` : '● ready'}${waiting}${ro}`;
     }
   });
 </script>
