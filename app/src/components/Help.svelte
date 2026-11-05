@@ -6,13 +6,14 @@
 
   const KEYS: [string, string][] = [
     ['↑ ↓   j k', 'move'],
-    ['enter → l', 'open a folder or file'],
+    ['enter →', 'open a folder or file'],
     ['← h   ⌫', 'up a folder'],
     ['g', 'list or grid'],
     ['/     ⌘F', 'find in every folder'],
     ['u', 'upload (or drop files in)'],
     ['+', 'new folder'],
     ['n', 'new note'],
+    ['l', 'new line diagram (.lin)'],
     ['r', 'rename'],
     ['m', 'move to another folder'],
     ['d', 'delete, for every device'],

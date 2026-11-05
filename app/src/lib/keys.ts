@@ -1,12 +1,13 @@
 // Claude — Date 11/03/2026
 // The key map: one key per action, as the key-hint bar shows them. Arrows and
-// hjkl both move. What left and right do depends on the view: in the list they
-// go up a folder and into one, in the grid they move between tiles. The viewer
-// and player have keys of their own (Viewer.svelte, Player.svelte).
+// hjk both move (`l` is taken by new diagrams, so → and Enter are what go in).
+// What left and right do depends on the view: in the list they go up a folder
+// and into one, in the grid they move between tiles. The viewer and player
+// have keys of their own (Viewer.svelte, Player.svelte).
 
 export type Action =
   | 'up' | 'down' | 'left' | 'right' | 'open' | 'back' | 'top' | 'bottom' | 'pageUp' | 'pageDown'
-  | 'upload' | 'mkdir' | 'note' | 'rename' | 'move' | 'delete' | 'save'
+  | 'upload' | 'mkdir' | 'note' | 'diagram' | 'rename' | 'move' | 'delete' | 'save'
   | 'find' | 'grid' | 'sync' | 'cancel' | 'help' | 'external' | 'settings';
 
 export interface KeyLike {
@@ -20,7 +21,7 @@ const PLAIN: Record<string, Action> = {
   ArrowUp: 'up', k: 'up',
   ArrowDown: 'down', j: 'down',
   ArrowLeft: 'left', h: 'left',
-  ArrowRight: 'right', l: 'right',
+  ArrowRight: 'right',
   Enter: 'open',
   Backspace: 'back',
   Home: 'top',
@@ -30,6 +31,7 @@ const PLAIN: Record<string, Action> = {
   u: 'upload',
   '+': 'mkdir', '=': 'mkdir',
   n: 'note',
+  l: 'diagram',
   r: 'rename',
   m: 'move',
   d: 'delete', Delete: 'delete',
@@ -62,6 +64,7 @@ export const HINTS: Hint[] = [
   { key: 'u', word: 'upload', action: 'upload' },
   { key: '+', word: 'folder', action: 'mkdir' },
   { key: 'n', word: 'note', action: 'note' },
+  { key: 'l', word: 'line', action: 'diagram' },
   { key: 'r', word: 'rename', action: 'rename' },
   { key: 'm', word: 'move', action: 'move' },
   { key: 'd', word: 'delete', action: 'delete' },

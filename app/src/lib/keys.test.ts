@@ -11,6 +11,9 @@ describe('keys', () => {
     expect(key('j')).toBe('down');
     expect(key('h')).toBe('left');
     expect(key('Enter')).toBe('open');
+    expect(key('ArrowRight')).toBe('right');
+    // `l` makes a new diagram; it no longer moves right.
+    expect(key('l')).toBe('diagram');
     expect(key('Backspace')).toBe('back');
   });
 

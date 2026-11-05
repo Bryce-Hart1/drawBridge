@@ -12,7 +12,30 @@
 // store unreachable: changes waiting, and an upload waiting for it.
 
 import type { Backend, DropEvent, Unlisten } from './api';
+import { serializeLin } from './lin/format';
+import type { Doc } from './lin/model';
 import type { CacheInfo, CmdError, Hit, Id, Item, Listing, NoteTarget, Status, SyncStatus, Transfer } from './types';
+
+/** Documents/flow.lin: every shape, every kind of line, and both ways a line can pulse. */
+const SAMPLE_DIAGRAM: Doc = {
+  lin: 1,
+  w: 1200,
+  h: 800,
+  next: 12,
+  items: [
+    { id: 1, t: 'rect', x: 200, y: 200, w: 180, h: 80, c: 6, f: 'o', text: 'client' },
+    { id: 2, t: 'diamond', x: 540, y: 200, w: 160, h: 110, c: 3, f: 'o', text: 'auth?' },
+    { id: 3, t: 'circle', x: 880, y: 200, w: 110, h: 110, c: 4, f: 'o', text: 'db' },
+    { id: 4, t: 'triangle', x: 540, y: 470, w: 140, h: 120, c: 1, f: 'i', text: 'err' },
+    { id: 5, t: 'rect', x: 200, y: 470, w: 180, h: 80, c: 8, f: 'o', text: 'cache' },
+    { id: 6, t: 'line', a: { to: 1 }, b: { to: 2 }, head: 'end', pulse: 'fwd', glow: 'ball', c: 0 },
+    { id: 7, t: 'line', a: { to: 2 }, b: { to: 3 }, head: 'end', pulse: 'fwd', glow: 'light', c: 4 },
+    { id: 8, t: 'line', a: { to: 2 }, b: { to: 4 }, head: 'end', pulse: 'mid', glow: 'ball', c: 1 },
+    { id: 9, t: 'line', a: { to: 5 }, b: { to: 1 }, head: 'both', pulse: 'rev', glow: 'light', c: 8 },
+    { id: 10, t: 'line', a: { to: 4 }, b: { to: 5 }, head: 'none', pulse: 'off', glow: 'ball', c: 0 },
+    { id: 11, t: 'line', a: { x: 760, y: 420 }, b: { x: 1060, y: 420 }, head: 'end', pulse: 'fwd', glow: 'ball', c: 7 },
+  ],
+};
 
 interface Node {
   id: Id;
@@ -31,6 +54,7 @@ const MIME: Record<string, string> = {
   md: 'text/markdown; charset=utf-8', txt: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
   csv: 'text/csv; charset=utf-8', json: 'application/json', pdf: 'application/pdf',
   mkv: 'video/x-matroska', heic: 'image/heic', c: 'text/plain; charset=utf-8',
+  lin: 'text/x-lin; charset=utf-8',
 };
 
 function mimeOf(name: string): string {
@@ -76,6 +100,7 @@ add(docs, 'notes.md', undefined, '# notes\n\n- call the plumber\n- back up the p
 add(docs, 'budget.csv', undefined, 'month,rent,food\njan,1200,410\nfeb,1200,388\n');
 add(docs, 'lease.pdf', 402_118);
 add(docs, 'finalMain.c', undefined, '#include <stdio.h>\n\nint main(void) {\n    puts("hello");\n    return 0;\n}\n');
+add(docs, 'flow.lin', undefined, serializeLin(SAMPLE_DIAGRAM));
 const logs = add(null, 'logs');
 for (let i = 0; i < 400; i++) add(logs, `run-${String(i).padStart(3, '0')}.log`, undefined, `run ${i}: ok\n`);
 add(null, 'readme.md', undefined, 'drawBridge mock store.\n\nEverything here is fake.\n');
@@ -413,6 +438,17 @@ export function mockBackend(): Backend {
     },
     async thumbSave() {
       return true;
+    },
+    async exportFile(path, jpeg) {
+      // No disk to write to: the browser downloads it. The last export is also
+      // kept on `window`, so a test can look at its bytes.
+      (window as unknown as { __lastExport?: { path: string; jpeg: Uint8Array } }).__lastExport = { path, jpeg };
+      const url = URL.createObjectURL(new Blob([jpeg as BlobPart], { type: 'image/jpeg' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = path.split('/').pop() ?? 'export.jpg';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
     },
 
     thumbUrl: (blob) => thumb(blob),

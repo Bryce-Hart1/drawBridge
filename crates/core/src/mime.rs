@@ -72,6 +72,9 @@ pub fn detect(path: &Path) -> (&'static str, Kind) {
         "md" | "markdown" => ("text/markdown; charset=utf-8", Kind::Str),
         "csv" => ("text/csv; charset=utf-8", Kind::Str),
         "json" => ("application/json", Kind::Str),
+        // A drawBridge diagram: JSON text the app draws instead of showing as
+        // text. Its own type, so it isn't taken for any other JSON.
+        "lin" => ("text/x-lin; charset=utf-8", Kind::Str),
         // Recorded as what it is. Whatever serves it to a webview must not
         // serve it as HTML: it would run script in the app's origin.
         "html" | "htm" => ("text/html; charset=utf-8", Kind::Str),
@@ -94,6 +97,8 @@ mod tests {
         assert_eq!(detect(Path::new("intro.mp4")), ("video/mp4", Kind::Video));
         assert_eq!(detect(Path::new("song.mp3")), ("audio/mpeg", Kind::Bin));
         assert_eq!(detect(Path::new("notes.md")).1, Kind::Str);
+        assert_eq!(detect(Path::new("flow.lin")), ("text/x-lin; charset=utf-8", Kind::Str));
+        assert_eq!(detect(Path::new("a/Flow.LIN")), ("text/x-lin; charset=utf-8", Kind::Str));
         assert_eq!(detect(Path::new("finalMain.c")), ("text/plain; charset=utf-8", Kind::Str));
         assert_eq!(detect(Path::new("src/App.svelte")).1, Kind::Str);
         assert_eq!(detect(Path::new("api.ts")).1, Kind::Str);

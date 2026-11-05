@@ -398,3 +398,153 @@ pub async fn sync_now(app: State<'_>) -> Result<()> {
     app.syncer.now();
     Ok(())
 }
+
+/// The most `export_file` writes. A JPEG of a diagram is a few MiB at the very
+/// most; this only stops a runaway.
+const EXPORT_LIMIT: usize = 64 << 20;
+
+/// Write a JPEG the page made (a .lin diagram, exported) to the path the user
+/// chose in the save panel. The bytes are the request body, not an argument,
+/// so a few MiB don't go through JSON as a number array; the path is hex in the
+/// `x-path` header (headers are ASCII; paths needn't be).
+///
+/// This is the one command that writes where the page says, so it writes only a
+/// JPEG, named as one (`check_export`).
+#[tauri::command]
+pub async fn export_file(request: tauri::ipc::Request<'_>) -> Result<()> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(CmdError::new("invalid", "an export is sent as bytes"));
+    };
+    let path = request
+        .headers()
+        .get("x-path")
+        .and_then(|v| v.to_str().ok())
+        .and_then(unhex)
+        .ok_or_else(|| CmdError::new("invalid", "an export needs a path"))?;
+    let path = PathBuf::from(path);
+    check_export(&path, bytes)?;
+    write_export(&path, bytes)
+}
+
+/// Whether `export_file` may write `bytes` to `path`: a JPEG, to a full path
+/// ending `.jpg` or `.jpeg`.
+fn check_export(path: &Path, bytes: &[u8]) -> Result<()> {
+    let named_jpeg = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
+    if !named_jpeg {
+        return Err(CmdError::new("invalid", "an export has to be named .jpg"));
+    }
+    if !path.is_absolute() {
+        return Err(CmdError::new("invalid", "an export needs a full path"));
+    }
+    if bytes.len() > EXPORT_LIMIT {
+        return Err(CmdError::new("invalid", "that image is too big to export"));
+    }
+    if !bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Err(CmdError::new("invalid", "that isn't a JPEG"));
+    }
+    Ok(())
+}
+
+/// Write to a hidden name beside the file and rename it into place, so a
+/// failure leaves the old file whole. (`config::write_atomic` swaps the
+/// extension for the temporary name, which could hit a neighbour like `a.tmp`
+/// in the user's own folder.)
+fn write_export(path: &Path, bytes: &[u8]) -> Result<()> {
+    if path.is_dir() {
+        return Err(CmdError::new("invalid", format!("{} is a folder", path.display())));
+    }
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.part"));
+    fs::write(&tmp, bytes)?;
+    fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp);
+    })?;
+    Ok(())
+}
+
+/// Hex back into text; `None` if it isn't hex or isn't UTF-8.
+fn unhex(s: &str) -> Option<String> {
+    if s.len() % 2 != 0 || !s.is_ascii() {
+        return None;
+    }
+    let bytes = (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    String::from_utf8(bytes).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10];
+
+    fn kind(r: Result<()>) -> Option<&'static str> {
+        r.err().map(|e| e.kind)
+    }
+
+    #[test]
+    fn unhex_reads_a_path() {
+        // "/tmp/é.jpg", the é as two UTF-8 bytes.
+        assert_eq!(unhex("2f746d702fc3a92e6a7067").as_deref(), Some("/tmp/é.jpg"));
+        assert_eq!(unhex(""), Some(String::new()));
+        assert_eq!(unhex("abc"), None);
+        assert_eq!(unhex("zz"), None);
+        // Valid hex, but not UTF-8.
+        assert_eq!(unhex("ff"), None);
+        // A multi-byte character can't be sliced in half.
+        assert_eq!(unhex("é"), None);
+    }
+
+    #[test]
+    fn export_takes_a_jpeg_named_as_one() {
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.jpg"), JPEG)), None);
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.JPEG"), JPEG)), None);
+    }
+
+    #[test]
+    fn export_refuses_anything_else() {
+        let ok = Path::new("/Users/me/flow.jpg");
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.png"), JPEG)), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("/Users/me/.zshrc"), JPEG)), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow"), JPEG)), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("flow.jpg"), JPEG)), Some("invalid"));
+        assert_eq!(kind(check_export(ok, b"#!/bin/sh\n")), Some("invalid"));
+        assert_eq!(kind(check_export(ok, &[])), Some("invalid"));
+        assert_eq!(kind(check_export(ok, &vec![0xFF; EXPORT_LIMIT + 1])), Some("invalid"));
+    }
+
+    #[test]
+    fn export_writes_and_replaces_without_leaving_a_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("flow.jpg");
+        write_export(&path, JPEG).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), JPEG);
+        let newer = [0xFF, 0xD8, 0xFF, 0xDB];
+        write_export(&path, &newer).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), newer);
+        let names: Vec<_> = fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("flow.jpg")]);
+    }
+
+    #[test]
+    fn export_leaves_a_neighbour_with_the_temp_extension_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let neighbour = dir.path().join("flow.tmp");
+        fs::write(&neighbour, b"mine").unwrap();
+        write_export(&dir.path().join("flow.jpg"), JPEG).unwrap();
+        assert_eq!(fs::read(&neighbour).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn export_will_not_write_over_a_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("flow.jpg");
+        fs::create_dir(&folder).unwrap();
+        assert_eq!(kind(write_export(&folder, JPEG)), Some("invalid"));
+    }
+}

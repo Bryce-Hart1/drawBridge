@@ -24,6 +24,7 @@
   import Grid from './Grid.svelte';
   import Help from './Help.svelte';
   import Inspector from './Inspector.svelte';
+  import LinEditor from './LinEditor.svelte';
   import Listing from './Listing.svelte';
   import NoteEditor from './NoteEditor.svelte';
   import PathBar from './PathBar.svelte';
@@ -58,6 +59,7 @@
       case 'upload': return act.pickAndUpload();
       case 'mkdir': return act.askMkdir();
       case 'note': return act.askNote();
+      case 'diagram': return act.askDiagram();
       case 'rename': return item && act.askRename(item);
       case 'move':
         if (item) ui.overlay = { kind: 'move', item };
@@ -126,6 +128,10 @@
   {:else if ui.overlay?.kind === 'note'}
     {#key ui.overlay}
       <NoteEditor note={ui.overlay} />
+    {/key}
+  {:else if ui.overlay?.kind === 'lin'}
+    {#key ui.overlay}
+      <LinEditor lin={ui.overlay} />
     {/key}
   {:else if ui.overlay?.kind === 'view'}
     {#key ui.overlay}

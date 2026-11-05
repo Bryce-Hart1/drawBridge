@@ -1,6 +1,6 @@
 // Claude — Date 11/03/2026
 import { describe, expect, it } from 'vitest';
-import { bar, baseMime, duration, fit, hasThumb, human, isText, percent, preview, scrubBar, sizeLabel, splitName, volumeBar, wantsPoster } from './format';
+import { bar, baseMime, duration, fit, hasThumb, human, isLin, isLinName, isText, percent, preview, scrubBar, sizeLabel, splitName, typeLabel, volumeBar, wantsPoster } from './format';
 import type { Item } from './types';
 
 const file = (over: Partial<Item>): Item => ({
@@ -83,5 +83,20 @@ describe('format', () => {
     expect(volumeBar(0.3, false)).toBe('▮▯▯▯');
     expect(volumeBar(0.01, false)).toBe('▮▯▯▯');
     expect(volumeBar(1, true)).toBe('muted');
+  });
+
+  it('knows a .lin diagram by its name, whatever the store recorded', () => {
+    // Uploaded before the type existed: plain bytes. Uploaded since: text/x-lin.
+    for (const mime of ['application/octet-stream', 'text/x-lin; charset=utf-8']) {
+      expect(isLin(file({ name: 'flow.lin', mime }))).toBe(true);
+    }
+    expect(isLin(file({ name: 'FLOW.LIN' }))).toBe(true);
+    expect(isLin(file({ name: 'flow.lin.bak' }))).toBe(false);
+    expect(isLin(file({ name: 'lin' }))).toBe(false);
+    expect(isLin(file({ name: '.lin' }))).toBe(false);
+    expect(isLin(file({ name: 'flow.lin', kind: 'folder', mime: null }))).toBe(false);
+    expect(isLinName('a.b.lin')).toBe(true);
+    expect(typeLabel(file({ name: 'flow.lin' }))).toBe('lin diagram');
+    expect(typeLabel(file({ name: 'a.png', mime: 'image/png' }))).toBe('image/png');
   });
 });

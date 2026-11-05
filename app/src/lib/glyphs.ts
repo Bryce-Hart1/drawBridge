@@ -2,7 +2,7 @@
 // Box-drawing pictures for entries without a thumbnail, in the grid and the
 // inspector. Every one is 5 lines of 11 cells.
 
-import { baseMime } from './format';
+import { baseMime, isLin } from './format';
 import type { Item } from './types';
 
 const FOLDER = [
@@ -53,10 +53,19 @@ const AUDIO = [
   '└─────────┘',
 ];
 
+const DIAGRAM = [
+  '┌────┐     ',
+  '│    ├──┐  ',
+  '└────┘  ▼  ',
+  '      ╭───╮',
+  '      ╰───╯',
+];
+
 export function glyph(item: Item): string {
   const mime = baseMime(item.mime);
   const art =
     item.kind === 'folder' ? FOLDER
+    : isLin(item) ? DIAGRAM
     : mime.startsWith('image/') ? IMAGE
     : mime.startsWith('video/') ? VIDEO
     : mime.startsWith('audio/') ? AUDIO

@@ -65,6 +65,7 @@ pub fn run() {
             commands::cache_set_cap,
             commands::cache_clear,
             commands::thumb_save,
+            commands::export_file,
             commands::sync_now,
         ])
         .run(tauri::generate_context!())

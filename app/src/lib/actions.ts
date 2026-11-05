@@ -3,7 +3,7 @@
 // what changed; anything that fails is reported in the bottom line.
 
 import { api } from './api';
-import { errorText, isText, plural, preview, splitName } from './format';
+import { errorText, isLin, isLinName, isText, plural, preview, splitName } from './format';
 import { current, ui } from './state.svelte';
 import type { Clash, Id, Item } from './types';
 
@@ -46,9 +46,14 @@ export function reload() {
   return load(ui.listing.dir, current()?.id ?? '');
 }
 
-/** Open a folder, a note, or a file in the viewer; anything else is saved as a copy. */
+/** Open a folder, a diagram, a note, or a file in the viewer; anything else is saved as a copy. */
 export function open(item: Item) {
   if (item.kind === 'folder') return load(item.id);
+  // Before isText: a .lin is text, but it's drawn, not typed.
+  if (isLin(item)) {
+    ui.overlay = { kind: 'lin', id: item.id, parent: ui.listing.dir, name: item.name, size: item.size ?? 0 };
+    return;
+  }
   if (isText(item)) {
     ui.overlay = { kind: 'note', id: item.id, parent: ui.listing.dir, name: item.name, size: item.size ?? 0 };
     return;
@@ -122,12 +127,30 @@ export function askDelete(item: Item) {
 export function askNote() {
   ui.prompt = {
     kind: 'input',
-    label: 'new note',
+    label: 'new note (name.lin for a diagram)',
     value: 'note.md',
     select: [0, 4],
     submit: (name) => {
       if (ui.listing.items.some((i) => i.name === name)) throw new Error(`${name} already exists`);
-      ui.overlay = { kind: 'note', id: null, parent: ui.listing.dir, name };
+      ui.overlay = isLinName(name)
+        ? { kind: 'lin', id: null, parent: ui.listing.dir, name, edit: true }
+        : { kind: 'note', id: null, parent: ui.listing.dir, name };
+    },
+  };
+}
+
+/** A new .lin diagram: ask for its name, then open it straight into the editor. */
+export function askDiagram() {
+  ui.prompt = {
+    kind: 'input',
+    label: 'new diagram',
+    value: 'diagram.lin',
+    select: [0, 7],
+    submit: (raw) => {
+      // Always a .lin, so a bare name still makes a diagram.
+      const name = isLinName(raw) ? raw : `${raw}.lin`;
+      if (ui.listing.items.some((i) => i.name === name)) throw new Error(`${name} already exists`);
+      ui.overlay = { kind: 'lin', id: null, parent: ui.listing.dir, name, edit: true };
     },
   };
 }

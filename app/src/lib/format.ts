@@ -32,7 +32,17 @@ export function baseMime(mime: string | null): string {
   return (mime ?? '').split(';')[0].trim();
 }
 
+/** A `.lin` diagram, by its name: a copy uploaded before the store knew the type is plain bytes. */
+export function isLinName(name: string): boolean {
+  return splitName(name)[1].toLowerCase() === '.lin';
+}
+
+export function isLin(item: Item): boolean {
+  return item.kind === 'file' && isLinName(item.name);
+}
+
 export function typeLabel(item: Item): string {
+  if (isLin(item)) return 'lin diagram';
   return item.kind === 'folder' ? 'folder' : baseMime(item.mime) || 'file';
 }
 

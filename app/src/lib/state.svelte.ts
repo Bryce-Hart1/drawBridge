@@ -22,6 +22,8 @@ export type Overlay =
   | { kind: 'find' }
   | { kind: 'move'; item: Item }
   | { kind: 'note'; id: Id | null; parent: Id | null; name: string; size?: number }
+  /** A .lin diagram: opens playing, or straight into editing (`edit`), as a new one does. */
+  | { kind: 'lin'; id: Id | null; parent: Id | null; name: string; size?: number; edit?: boolean }
   | { kind: 'view'; item: Item }
   | { kind: 'settings' };
 
