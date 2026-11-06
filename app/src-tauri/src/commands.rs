@@ -399,17 +399,17 @@ pub async fn sync_now(app: State<'_>) -> Result<()> {
     Ok(())
 }
 
-/// The most `export_file` writes. A JPEG of a diagram is a few MiB at the very
+/// The most `export_file` writes. A diagram's image is a few MiB at the very
 /// most; this only stops a runaway.
 const EXPORT_LIMIT: usize = 64 << 20;
 
-/// Write a JPEG the page made (a .lin diagram, exported) to the path the user
-/// chose in the save panel. The bytes are the request body, not an argument,
-/// so a few MiB don't go through JSON as a number array; the path is hex in the
-/// `x-path` header (headers are ASCII; paths needn't be).
+/// Write a diagram the page made (a .lin, exported as a JPEG, PNG or SVG) to
+/// the path the user chose in the save panel. The bytes are the request body,
+/// not an argument, so a few MiB don't go through JSON as a number array; the
+/// path is hex in the `x-path` header (headers are ASCII; paths needn't be).
 ///
-/// This is the one command that writes where the page says, so it writes only a
-/// JPEG, named as one (`check_export`).
+/// This is the one command that writes where the page says, so it writes only
+/// an image file, named for what it is (`check_export`).
 #[tauri::command]
 pub async fn export_file(request: tauri::ipc::Request<'_>) -> Result<()> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
@@ -426,15 +426,13 @@ pub async fn export_file(request: tauri::ipc::Request<'_>) -> Result<()> {
     write_export(&path, bytes)
 }
 
-/// Whether `export_file` may write `bytes` to `path`: a JPEG, to a full path
-/// ending `.jpg` or `.jpeg`.
+/// Whether `export_file` may write `bytes` to `path`: a full path ending
+/// `.jpg`, `.jpeg`, `.png` or `.svg`, holding what that extension says.
 fn check_export(path: &Path, bytes: &[u8]) -> Result<()> {
-    let named_jpeg = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
-    if !named_jpeg {
-        return Err(CmdError::new("invalid", "an export has to be named .jpg"));
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    let ext = ext.as_deref().unwrap_or("");
+    if !matches!(ext, "jpg" | "jpeg" | "png" | "svg") {
+        return Err(CmdError::new("invalid", "an export has to be named .jpg, .png or .svg"));
     }
     if !path.is_absolute() {
         return Err(CmdError::new("invalid", "an export needs a full path"));
@@ -442,10 +440,24 @@ fn check_export(path: &Path, bytes: &[u8]) -> Result<()> {
     if bytes.len() > EXPORT_LIMIT {
         return Err(CmdError::new("invalid", "that image is too big to export"));
     }
-    if !bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Err(CmdError::new("invalid", "that isn't a JPEG"));
+    let genuine = match ext {
+        "png" => bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]),
+        "svg" => is_svg(bytes),
+        _ => bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
+    };
+    if !genuine {
+        return Err(CmdError::new("invalid", format!("that isn't a {}", ext.to_ascii_uppercase())));
     }
     Ok(())
+}
+
+/// Text that opens an SVG document: UTF-8, no NULs, starting `<svg` or `<?xml`.
+fn is_svg(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let head = text.trim_start_matches('\u{feff}').trim_start();
+    !text.contains('\0') && (head.starts_with("<svg") || head.starts_with("<?xml"))
 }
 
 /// Write to a hidden name beside the file and rename it into place, so a
@@ -482,6 +494,8 @@ mod tests {
     use super::*;
 
     const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10];
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0];
+    const SVG: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>\n";
 
     fn kind(r: Result<()>) -> Option<&'static str> {
         r.err().map(|e| e.kind)
@@ -501,15 +515,28 @@ mod tests {
     }
 
     #[test]
-    fn export_takes_a_jpeg_named_as_one() {
+    fn export_takes_an_image_named_as_one() {
         assert_eq!(kind(check_export(Path::new("/Users/me/flow.jpg"), JPEG)), None);
         assert_eq!(kind(check_export(Path::new("/Users/me/flow.JPEG"), JPEG)), None);
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.png"), PNG)), None);
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.SVG"), SVG)), None);
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.svg"), b"\xEF\xBB\xBF <?xml version=\"1.0\"?><svg/>")), None);
+    }
+
+    #[test]
+    fn export_checks_the_bytes_against_the_extension() {
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.png"), JPEG)), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.jpg"), PNG)), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.svg"), JPEG)), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.svg"), b"#!/bin/sh\n")), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.svg"), b"<svg>\0</svg>")), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.svg"), &[0xFF, 0xFE, b'<'])), Some("invalid"));
     }
 
     #[test]
     fn export_refuses_anything_else() {
         let ok = Path::new("/Users/me/flow.jpg");
-        assert_eq!(kind(check_export(Path::new("/Users/me/flow.png"), JPEG)), Some("invalid"));
+        assert_eq!(kind(check_export(Path::new("/Users/me/flow.gif"), JPEG)), Some("invalid"));
         assert_eq!(kind(check_export(Path::new("/Users/me/.zshrc"), JPEG)), Some("invalid"));
         assert_eq!(kind(check_export(Path::new("/Users/me/flow"), JPEG)), Some("invalid"));
         assert_eq!(kind(check_export(Path::new("flow.jpg"), JPEG)), Some("invalid"));

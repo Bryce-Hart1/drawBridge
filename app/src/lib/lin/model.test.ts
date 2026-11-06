@@ -32,7 +32,8 @@ describe('new parts', () => {
     expect(newShape(1, 'circle', 0, 0)).toMatchObject({ w: 100, h: 100 });
   });
 
-  it('start a line as a still arrow', () => {
-    expect(newLine(2, { to: 1 }, { x: 5, y: 5 })).toMatchObject({ head: 'end', pulse: 'off', glow: 'ball', c: 0 });
+  it('start a line plain and still, with the arrowheads to be added', () => {
+    expect(newLine(2, { to: 1 }, { x: 5, y: 5 })).toMatchObject({ head: 'none', pulse: 'off', glow: 'ball', c: 0, route: 'straight', ln: 'solid', text: '' });
+    expect(newShape(1, 'rect', 0, 0).ln).toBe('solid');
   });
 });

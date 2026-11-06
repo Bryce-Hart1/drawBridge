@@ -7,6 +7,10 @@
 //    {"id":2,"t":"line","a":{"to":1},"b":{"x":700,"y":200},"head":"end","pulse":"fwd","glow":"ball","c":0}
 //   ]}
 //
+// A shape may also have `"ln":"dash"|"dot"`; a line may have `"route":"curve"|"elbow"`,
+// `"ln"`, and a label `"text"` in font `"f"`. They're left out when they're the
+// default, so a file that doesn't use them reads and writes as it always did.
+//
 // Parsing is strict about structure (a part it can't make sense of is an
 // error, never silently dropped, since the editor would then save the loss)
 // and forgiving about numbers, which are clamped into range.
@@ -15,11 +19,14 @@ import {
   FONT_KEYS,
   GLOWS,
   HEADS,
+  MAX_LABEL,
   MAX_SIZE,
   MAX_TEXT,
   MIN_SIZE,
   PULSES,
+  ROUTES,
   SHAPE_KINDS,
+  STROKES,
   isLine,
   type Doc,
   type End,
@@ -29,8 +36,10 @@ import {
   type Line,
   type Part,
   type Pulse,
+  type Route,
   type Shape,
   type ShapeKind,
+  type Stroke,
 } from './model';
 
 const PAGE_MIN = 200;
@@ -120,6 +129,7 @@ function parseShape(raw: Raw, id: number, pageW: number, pageH: number): Shape {
     c,
     f: oneOf<FontKey>(raw.f, FONT_KEYS, 'o', 'f'),
     text,
+    ln: oneOf<Stroke>(raw.ln, STROKES, 'solid', 'ln'),
   };
 }
 
@@ -140,10 +150,14 @@ function parseLine(raw: Raw, id: number): Line {
     t: 'line',
     a: parseEnd(raw.a, 'a'),
     b: parseEnd(raw.b, 'b'),
-    head: oneOf<Head>(raw.head, HEADS, 'end', 'head'),
+    head: oneOf<Head>(raw.head, HEADS, 'none', 'head'),
     pulse: oneOf<Pulse>(raw.pulse, PULSES, 'off', 'pulse'),
     glow: oneOf<Glow>(raw.glow, GLOWS, 'ball', 'glow'),
     c,
+    route: oneOf<Route>(raw.route, ROUTES, 'straight', 'route'),
+    ln: oneOf<Stroke>(raw.ln, STROKES, 'solid', 'ln'),
+    text: typeof raw.text === 'string' ? [...raw.text.replace(/[\r\n]+/g, ' ')].slice(0, MAX_LABEL).join('') : '',
+    f: oneOf<FontKey>(raw.f, FONT_KEYS, 'o', 'f'),
   };
 }
 
@@ -153,14 +167,20 @@ function endJson(e: End): string {
 
 function partJson(p: Part): string {
   if (isLine(p)) {
+    // What a plain line leaves out stays out, so older files read and write the same.
+    const more =
+      (p.route !== 'straight' ? `,"route":"${p.route}"` : '') +
+      (p.ln !== 'solid' ? `,"ln":"${p.ln}"` : '') +
+      (p.text !== '' ? `,"text":${JSON.stringify(p.text)}` : '') +
+      (p.text !== '' || p.f !== 'o' ? `,"f":"${p.f}"` : '');
     return (
       `{"id":${p.id},"t":"line","a":${endJson(p.a)},"b":${endJson(p.b)},` +
-      `"head":"${p.head}","pulse":"${p.pulse}","glow":"${p.glow}","c":${p.c}}`
+      `"head":"${p.head}","pulse":"${p.pulse}","glow":"${p.glow}","c":${p.c}${more}}`
     );
   }
   return (
     `{"id":${p.id},"t":"${p.t}","x":${r1(p.x)},"y":${r1(p.y)},"w":${r1(p.w)},"h":${r1(p.h)},` +
-    `"c":${p.c},"f":"${p.f}","text":${JSON.stringify(p.text)}}`
+    `"c":${p.c},"f":"${p.f}","text":${JSON.stringify(p.text)}${p.ln !== 'solid' ? `,"ln":"${p.ln}"` : ''}}`
   );
 }
 

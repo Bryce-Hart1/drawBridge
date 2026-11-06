@@ -13,6 +13,7 @@ export type Command =
   | { do: 'arm'; tool: ShapeKind | 'line' }
   | { do: 'select'; dir: 1 | -1 }
   | { do: 'resize'; dir: Dir; big: boolean }
+  | { do: 'nudge'; dir: Dir; fine: boolean }
   | { do: 'color'; c: number }
   | { do: 'font'; f: FontKey }
   | { do: 'type' }
@@ -20,6 +21,15 @@ export type Command =
   | { do: 'flip' }
   | { do: 'pulse' }
   | { do: 'glow' }
+  | { do: 'route' }
+  | { do: 'style' }
+  | { do: 'order'; to: 'up' | 'down' | 'front' | 'back' }
+  | { do: 'grid' }
+  | { do: 'zoom'; by: 'in' | 'out' | 'fit' }
+  | { do: 'copy' }
+  | { do: 'paste' }
+  | { do: 'duplicate' }
+  | { do: 'all' }
   | { do: 'delete' }
   | { do: 'undo' }
   | { do: 'redo' }
@@ -58,13 +68,22 @@ export function isTypable(key: string): boolean {
 
 export function commandFor(e: KeyEvent, mode: Mode): Command | null {
   const chord = e.metaKey || e.ctrlKey;
-  if (e.altKey) return null;
+  if (e.altKey) {
+    // ⌥ with an arrow moves the selection: 10 px, or 1 with ⇧. Nothing else uses ⌥.
+    if (!chord && mode.edit && !mode.typing && e.key in ARROWS) return { do: 'nudge', dir: ARROWS[e.key], fine: e.shiftKey };
+    return null;
+  }
 
   if (chord) {
     const k = e.key.toLowerCase();
     if (k === 's') return { do: 'save' };
+    if (!mode.edit || mode.typing) return null;
     // Typing has no undo of its own; the text is one step back.
-    if (mode.edit && !mode.typing && k === 'z') return { do: e.shiftKey ? 'redo' : 'undo' };
+    if (k === 'z') return { do: e.shiftKey ? 'redo' : 'undo' };
+    if (k === 'c') return { do: 'copy' };
+    if (k === 'v') return { do: 'paste' };
+    if (k === 'd') return { do: 'duplicate' };
+    if (k === 'a') return { do: 'all' };
     return null;
   }
 
@@ -81,6 +100,10 @@ export function commandFor(e: KeyEvent, mode: Mode): Command | null {
   if (k === ' ') return { do: 'play' };
   if (k === 'x') return { do: 'export' };
   if (k === 'e') return { do: 'edit' };
+  // Looking around works while viewing too.
+  if (k === '=' || k === '+') return { do: 'zoom', by: 'in' };
+  if (k === '-' || k === '_') return { do: 'zoom', by: 'out' };
+  if (k === 'z') return { do: 'zoom', by: 'fit' };
   if (!mode.edit) return null;
 
   if (k in ARM) return { do: 'arm', tool: ARM[k] };
@@ -93,6 +116,13 @@ export function commandFor(e: KeyEvent, mode: Mode): Command | null {
   if (k === 'f') return { do: 'flip' };
   if (k === 'm') return { do: 'pulse' };
   if (k === 's') return { do: 'glow' };
+  if (k === 'b') return { do: 'route' };
+  if (k === 'w') return { do: 'style' };
+  if (k === 'g') return { do: 'grid' };
+  if (k === ']') return { do: 'order', to: 'up' };
+  if (k === '[') return { do: 'order', to: 'down' };
+  if (k === '}') return { do: 'order', to: 'front' };
+  if (k === '{') return { do: 'order', to: 'back' };
   if (k === 'Backspace' || k === 'Delete') return { do: 'delete' };
   return null;
 }
@@ -111,8 +141,8 @@ export interface Hint {
 }
 
 export interface Context extends Mode {
-  /** What is selected. */
-  selected: 'shape' | 'line' | null;
+  /** What is selected: one shape, one line, or several parts. */
+  selected: 'shape' | 'line' | 'many' | null;
   /** A shape or line tool is waiting for a click. */
   armed: boolean;
   playing: boolean;
@@ -130,17 +160,38 @@ const h = (label: string, word: string, press: string | null, does: Command['do'
 export function hintsFor(c: Context): Hint[] {
   if (c.typing) return [h('⏎', 'done', 'Enter', 'done'), h('esc', 'done', 'Escape', 'done'), h('⌫', 'delete', 'Backspace', 'backspace')];
   const play = h('space', c.playing ? 'pause' : 'play', ' ', 'play');
-  if (!c.edit) return [play, h('e', 'edit', 'e', 'edit'), h('x', 'export jpeg', 'x', 'export'), h('esc', 'close', 'Escape', 'escape')];
+  const zoom = h('+ -', 'zoom', '=', 'zoom');
+  const fit = h('z', 'fit', 'z', 'zoom');
+  if (!c.edit) return [play, h('e', 'edit', 'e', 'edit'), zoom, fit, h('x', 'export', 'x', 'export'), h('esc', 'close', 'Escape', 'escape')];
   if (c.armed) return [h('click', 'to place', null, null), h('esc', 'cancel', 'Escape', 'escape')];
 
-  const tail = [play, h('⌘S', 'save', 's', 'save', true), h('x', 'jpeg', 'x', 'export'), h('e', 'view', 'e', 'edit'), h('esc', c.selected ? 'deselect' : 'close', 'Escape', 'escape')];
+  const tail = [
+    play,
+    h('⌘S', 'save', 's', 'save', true),
+    h('x', 'export', 'x', 'export'),
+    zoom,
+    fit,
+    h('g', 'grid', 'g', 'grid'),
+    h('e', 'view', 'e', 'edit'),
+    h('esc', c.selected ? 'deselect' : 'close', 'Escape', 'escape'),
+  ];
+  const common = [
+    h('⌥ arrows', 'move', 'ArrowLeft', 'resize'),
+    h('⌘D', 'duplicate', 'd', 'duplicate', true),
+    h('⌘C ⌘V', 'copy', 'c', 'copy', true),
+    h('[ ]', 'order', ']', 'order'),
+    h('w', 'outline', 'w', 'style'),
+    h('⌫', 'delete', 'Backspace', 'delete'),
+  ];
+  // The ⌥ hint is a description, not a key a test can press: it has no `press`.
+  common[0] = { label: '⌥ arrows', word: 'move', press: null, does: null };
   if (c.selected === 'shape') {
     return [
       h('← → ↑ ↓', 'size', 'ArrowLeft', 'resize'),
       h('0-9', 'colour', '0', 'color'),
       h('i o p', 'font', 'i', 'font'),
       h('⏎', 'text', 'Enter', 'type'),
-      h('⌫', 'delete', 'Backspace', 'delete'),
+      ...common,
       h('tab', 'next', 'Tab', 'select'),
       ...tail,
     ];
@@ -149,11 +200,25 @@ export function hintsFor(c: Context): Hint[] {
     return [
       h('a', 'arrowheads', 'a', 'head'),
       h('f', 'flip', 'f', 'flip'),
+      h('b', 'bend', 'b', 'route'),
       h('m', 'pulse', 'm', 'pulse'),
       h('s', 'ball/light', 's', 'glow'),
+      h('⏎', 'label', 'Enter', 'type'),
       h('0-9', 'colour', '0', 'color'),
-      h('⌫', 'delete', 'Backspace', 'delete'),
+      h('i o p', 'font', 'i', 'font'),
+      ...common,
       h('tab', 'next', 'Tab', 'select'),
+      ...tail,
+    ];
+  }
+  if (c.selected === 'many') {
+    return [
+      h('← → ↑ ↓', 'size', 'ArrowLeft', 'resize'),
+      h('0-9', 'colour', '0', 'color'),
+      h('i o p', 'font', 'i', 'font'),
+      h('a', 'arrowheads', 'a', 'head'),
+      h('m', 'pulse', 'm', 'pulse'),
+      ...common,
       ...tail,
     ];
   }
@@ -161,6 +226,8 @@ export function hintsFor(c: Context): Hint[] {
     h('c t r d', 'shape', 'c', 'arm'),
     h('l', 'line', 'l', 'arm'),
     h('tab', 'select', 'Tab', 'select'),
+    h('⌘A', 'all', 'a', 'all', true),
+    h('⌘V', 'paste', 'v', 'paste', true),
     h('⌘Z', 'undo', 'z', 'undo', true),
     ...tail,
   ];

@@ -1,6 +1,6 @@
 // Claude — Date 11/04/2026
-// Thumbnails the app can't make at upload, drawn here instead: a frame from a
-// video, or a HEIC, AVIF, TIFF or BMP photo, which WebKit decodes and the
+// Thumbnails the app can't make at upload, drawn here instead: a .lin diagram
+// (drawn from its own file), a frame from a video, or a HEIC, AVIF, TIFF or BMP photo, which WebKit decodes and the
 // image crate doesn't. The file is read from the stream server into an
 // element nobody sees, drawn onto a canvas at most 256 px across, and handed
 // to Rust as a JPEG, which keeps it and puts it in the store for every other
@@ -10,6 +10,9 @@
 // folder of videos never streams them all.
 
 import { api } from './api';
+import { isLin } from './format';
+import { thumbnail } from './lin/draw';
+import { parseLin } from './lin/format';
 import type { Item } from './types';
 
 const SIDE = 256;
@@ -42,7 +45,16 @@ async function pump() {
   running = false;
 }
 
+/** A .lin diagram's thumbnail: the diagram itself, drawn small. An empty page has none. */
+async function drawDiagram(item: Item): Promise<boolean> {
+  const got = await api.noteRead(item.id);
+  if (got.truncated) return false;
+  await api.thumbSave(item.blob!, await thumbnail(parseLin(got.text), SIDE));
+  return true;
+}
+
 async function draw(item: Item): Promise<boolean> {
+  if (isLin(item)) return drawDiagram(item);
   const url = await api.streamUrl(item.id);
   const video = (item.mime ?? '').startsWith('video/');
   const source = video ? await frame(url) : await picture(url);

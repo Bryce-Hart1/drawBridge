@@ -30,6 +30,11 @@ export const STEP = 10;
 export const BIG_STEP = 40;
 /** Most characters in one shape, however much room it has. */
 export const MAX_TEXT = 200;
+/** Most characters in a label on a line (one row, however long the line). */
+export const MAX_LABEL = 40;
+/** The snap grid, in page pixels, and how far a copy lands from what it copies. */
+export const GRID = 10;
+export const COPY_OFFSET = 20;
 
 /**
  * Colours `0`–`9`. `0` is plain: a shape in the page's own colour with an ink
@@ -58,6 +63,14 @@ export function tint(hex: string, alpha = TINT): string {
   return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
 
+/** How an outline is drawn: unbroken, dashed or dotted. */
+export type Stroke = 'solid' | 'dash' | 'dot';
+export const STROKES: readonly Stroke[] = ['solid', 'dash', 'dot'];
+
+/** The path a line takes: straight, a gentle curve, or square corners. */
+export type Route = 'straight' | 'curve' | 'elbow';
+export const ROUTES: readonly Route[] = ['straight', 'curve', 'elbow'];
+
 export type Head = 'none' | 'end' | 'both';
 export const HEADS: readonly Head[] = ['none', 'end', 'both'];
 
@@ -81,6 +94,7 @@ export interface Shape {
   c: number;
   f: FontKey;
   text: string;
+  ln: Stroke;
 }
 
 export type End = { x: number; y: number } | { to: number };
@@ -94,6 +108,11 @@ export interface Line {
   pulse: Pulse;
   glow: Glow;
   c: number;
+  route: Route;
+  ln: Stroke;
+  /** A label, one row, drawn over the middle of the line; in font `f`. */
+  text: string;
+  f: FontKey;
 }
 
 export type Part = Shape | Line;
@@ -125,12 +144,12 @@ const SIZES: Record<ShapeKind, [w: number, h: number]> = {
 /** A new shape centred at (x, y), medium font, no text. Doesn't touch the doc. */
 export function newShape(id: number, t: ShapeKind, x: number, y: number): Shape {
   const [w, h] = SIZES[t];
-  return { id, t, x, y, w, h, c: 0, f: 'o', text: '' };
+  return { id, t, x, y, w, h, c: 0, f: 'o', text: '', ln: 'solid' };
 }
 
-/** A new line from `a` to `b`: a single arrow, not pulsing. */
+/** A new line from `a` to `b`: plain, straight, not pulsing. Arrowheads are added on (`a`). */
 export function newLine(id: number, a: End, b: End): Line {
-  return { id, t: 'line', a, b, head: 'end', pulse: 'off', glow: 'ball', c: 0 };
+  return { id, t: 'line', a, b, head: 'none', pulse: 'off', glow: 'ball', c: 0, route: 'straight', ln: 'solid', text: '', f: 'o' };
 }
 
 export function find(doc: Doc, id: number | null): Part | undefined {

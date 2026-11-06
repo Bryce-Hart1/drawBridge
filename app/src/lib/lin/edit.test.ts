@@ -2,6 +2,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   History,
+  copyParts,
+  cycleRoute,
+  cycleStroke,
+  duplicate,
+  each,
+  moveBy,
+  pasteParts,
+  removeMany,
+  reorder,
   addLine,
   addShape,
   backspace,
@@ -170,9 +179,26 @@ describe('text', () => {
     expect('doc' in backspace(ok(backspace(ok(backspace(doc, 1)), 1)), 1)).toBe(true);
   });
 
-  it('is for shapes only', () => {
-    expect(typeChar(pair(), 3, 'a')).toHaveProperty('error');
-    expect(setFont(pair(), 3, 'p')).toHaveProperty('error');
+  it('labels a line, up to what fits along it', () => {
+    // The two rectangles are 140 px apart: 11 medium characters and some padding.
+    let doc = pair();
+    let typed = 0;
+    for (;;) {
+      const next = typeChar(doc, 3, 'x');
+      if ('error' in next) break;
+      doc = next.doc;
+      typed++;
+    }
+    expect(typed).toBe(11);
+    expect(line(doc).text).toBe('x'.repeat(11));
+    expect(line(ok(backspace(doc, 3))).text).toBe('x'.repeat(10));
+  });
+
+  it('keeps a label from outgrowing its line with a bigger font', () => {
+    let doc = pair();
+    for (const ch of 'eight ch') doc = ok(typeChar(doc, 3, ch));
+    expect(setFont(doc, 3, 'p')).toHaveProperty('error');
+    expect(line(ok(setFont(doc, 3, 'i'))).f).toBe('i');
   });
 });
 
@@ -184,8 +210,8 @@ describe('lines', () => {
       doc = ok(cycleHead(doc, 3));
       heads.push(line(doc).head);
     }
-    // A new line is an arrow already.
-    expect(heads).toEqual(['both', 'none', 'end', 'both']);
+    // A new line is plain; the arrows are added on.
+    expect(heads).toEqual(['end', 'both', 'none', 'end']);
   });
 
   it('cycles the pulse: off, start to end, end to start, from the middle', () => {
@@ -292,9 +318,10 @@ describe('describe', () => {
 
   it('summarises a line with its pulse', () => {
     let doc = pair();
-    expect(describePart(find(doc, 3)!)).toBe('arrow · plain · still');
+    expect(describePart(find(doc, 3)!)).toBe('line · plain · still');
+    expect(describePart(find(ok(cycleHead(doc, 3)), 3)!)).toBe('arrow · plain · still');
     doc = ok(toggleGlow(ok(cyclePulse(doc, 3)), 3));
-    expect(describePart(find(doc, 3)!)).toBe('arrow · plain · pulse a→b · light');
+    expect(describePart(find(doc, 3)!)).toBe('line · plain · pulse a→b · light');
     expect(isLine(find(doc, 3)!)).toBe(true);
   });
 });
@@ -322,5 +349,126 @@ describe('History', () => {
     expect(h.canRedo).toBe(true);
     h.push(a);
     expect(h.canRedo).toBe(false);
+  });
+});
+
+describe('moving several at once', () => {
+  it('moves shapes together and keeps them all on the page', () => {
+    const moved = moveBy(pair(), [1, 2], 30, -10);
+    expect(shapeById(moved, 1)).toMatchObject({ x: 130, y: 90 });
+    expect(shapeById(moved, 2)).toMatchObject({ x: 430, y: 90 });
+    // Shape 2 reaches the right edge first, so shape 1 stops the same distance along.
+    const far = moveBy(pair(), [1, 2], 5000, 0);
+    expect(shapeById(far, 2)!.x).toBe(1120);
+    expect(shapeById(far, 1)!.x).toBe(820);
+  });
+
+  it('moves the free ends of a selected line, and leaves attached ends on their shapes', () => {
+    let doc = addShape(blankDoc(), 'rect', { x: 100, y: 100 }).doc;
+    doc = ok(addLine(doc, { to: 1 }, { x: 500, y: 500 }));
+    const moved = moveBy(doc, [2], 25, 5);
+    expect(line(moved, 2).a).toEqual({ to: 1 });
+    expect(line(moved, 2).b).toEqual({ x: 525, y: 505 });
+    expect(moveBy(doc, [2], 0, 0)).toBe(doc);
+  });
+
+  it('does a command to each part, and fails only if it worked on none', () => {
+    const doc = pair();
+    expect(shapeById(ok(each(doc, [1, 2], (d, i) => recolor(d, i, 4))), 2)!.c).toBe(4);
+    // A resize is for shapes: the line in the selection is skipped.
+    expect(shapeById(ok(each(doc, [1, 3], (d, i) => resize(d, i, 'right', false))), 1)!.w).toBe(170);
+    expect(each(doc, [3], (d, i) => resize(d, i, 'right', false))).toEqual({ error: 'select a shape to resize it' });
+    expect(each(doc, [], (d, i) => recolor(d, i, 1))).toHaveProperty('error');
+  });
+});
+
+describe('outline and route', () => {
+  it('cycles solid, dashed, dotted for shapes and lines', () => {
+    let doc = pair();
+    const seen: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      doc = ok(cycleStroke(doc, 1));
+      seen.push(shapeById(doc, 1)!.ln);
+    }
+    expect(seen).toEqual(['dash', 'dot', 'solid', 'dash']);
+    expect(line(ok(cycleStroke(pair(), 3))).ln).toBe('dash');
+    expect(cycleStroke(pair(), 99)).toHaveProperty('error');
+  });
+
+  it('cycles straight, curved, square for lines only', () => {
+    let doc = pair();
+    const seen: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      doc = ok(cycleRoute(doc, 3));
+      seen.push(line(doc).route);
+    }
+    expect(seen).toEqual(['curve', 'elbow', 'straight', 'curve']);
+    expect(cycleRoute(pair(), 1)).toHaveProperty('error');
+  });
+});
+
+describe('stacking order', () => {
+  const order = (d: Doc) => d.items.map((p) => p.id);
+
+  it('moves a step, or all the way', () => {
+    expect(order(ok(reorder(pair(), [1], 'front')))).toEqual([2, 3, 1]);
+    expect(order(ok(reorder(pair(), [3], 'back')))).toEqual([3, 1, 2]);
+    expect(order(ok(reorder(pair(), [1], 'up')))).toEqual([2, 1, 3]);
+    expect(order(ok(reorder(pair(), [2], 'down')))).toEqual([2, 1, 3]);
+    expect(order(ok(reorder(pair(), [1, 2], 'front')))).toEqual([3, 1, 2]);
+  });
+
+  it('says when it is already there', () => {
+    expect(reorder(pair(), [3], 'up')).toEqual({ error: 'already at the front' });
+    expect(reorder(pair(), [1], 'back')).toEqual({ error: 'already at the back' });
+    expect(reorder(pair(), [], 'front')).toHaveProperty('error');
+  });
+});
+
+describe('copy, paste and duplicate', () => {
+  it('copies parts, freeing a line end left on a shape that is not copied', () => {
+    const parts = copyParts(pair(), [1, 3]);
+    expect(parts.map((p) => p.id)).toEqual([1, 3]);
+    const l = parts[1] as Line;
+    expect(l.a).toEqual({ to: 1 });
+    // The end on shape 2 stays where it was: the edge of the 160-wide rectangle at x = 400.
+    expect((l.b as { x: number }).x).toBeCloseTo(320);
+    expect((l.b as { y: number }).y).toBeCloseTo(100);
+  });
+
+  it('pastes new parts, joining the lines between pasted shapes', () => {
+    const doc = pair();
+    const r = pasteParts(doc, copyParts(doc, [1, 2, 3]), { x: 0, y: 200 });
+    expect(r.ids).toEqual([4, 5, 6]);
+    expect(shapeById(r.doc, 4)).toMatchObject({ x: 100, y: 300 });
+    expect(line(r.doc, 6).a).toEqual({ to: 4 });
+    expect(line(r.doc, 6).b).toEqual({ to: 5 });
+    expect(r.doc.next).toBe(7);
+    // The original is untouched.
+    expect(line(r.doc, 3).a).toEqual({ to: 1 });
+  });
+
+  it('keeps pasted shapes on the page', () => {
+    const doc = pair();
+    const r = pasteParts(doc, copyParts(doc, [2]), { x: 5000, y: 0 });
+    expect(shapeById(r.doc, r.ids[0])!.x).toBe(1120);
+  });
+
+  it('duplicates a little way off and selects the copy', () => {
+    const r = duplicate(pair(), [1]) as { doc: Doc; ids: number[] };
+    expect(r.ids).toEqual([4]);
+    expect(shapeById(r.doc, 4)).toMatchObject({ x: 120, y: 120 });
+    expect(duplicate(pair(), [])).toHaveProperty('error');
+  });
+
+  it('duplicates a lone line as a second line between the same shapes', () => {
+    const r = duplicate(pair(), [3]) as { doc: Doc; ids: number[] };
+    expect(line(r.doc, 4).a).toEqual({ to: 1 });
+    expect(line(r.doc, 4).b).toEqual({ to: 2 });
+  });
+
+  it('deletes several parts', () => {
+    const doc = removeMany(pair(), [1, 3]);
+    expect(doc.items.map((p) => p.id)).toEqual([2]);
   });
 });

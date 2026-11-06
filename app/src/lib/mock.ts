@@ -21,19 +21,24 @@ const SAMPLE_DIAGRAM: Doc = {
   lin: 1,
   w: 1200,
   h: 800,
-  next: 12,
+  next: 16,
   items: [
-    { id: 1, t: 'rect', x: 200, y: 200, w: 180, h: 80, c: 6, f: 'o', text: 'client' },
-    { id: 2, t: 'diamond', x: 540, y: 200, w: 160, h: 110, c: 3, f: 'o', text: 'auth?' },
-    { id: 3, t: 'circle', x: 880, y: 200, w: 110, h: 110, c: 4, f: 'o', text: 'db' },
-    { id: 4, t: 'triangle', x: 540, y: 470, w: 140, h: 120, c: 1, f: 'i', text: 'err' },
-    { id: 5, t: 'rect', x: 200, y: 470, w: 180, h: 80, c: 8, f: 'o', text: 'cache' },
-    { id: 6, t: 'line', a: { to: 1 }, b: { to: 2 }, head: 'end', pulse: 'fwd', glow: 'ball', c: 0 },
-    { id: 7, t: 'line', a: { to: 2 }, b: { to: 3 }, head: 'end', pulse: 'fwd', glow: 'light', c: 4 },
-    { id: 8, t: 'line', a: { to: 2 }, b: { to: 4 }, head: 'end', pulse: 'mid', glow: 'ball', c: 1 },
-    { id: 9, t: 'line', a: { to: 5 }, b: { to: 1 }, head: 'both', pulse: 'rev', glow: 'light', c: 8 },
-    { id: 10, t: 'line', a: { to: 4 }, b: { to: 5 }, head: 'none', pulse: 'off', glow: 'ball', c: 0 },
-    { id: 11, t: 'line', a: { x: 760, y: 420 }, b: { x: 1060, y: 420 }, head: 'end', pulse: 'fwd', glow: 'ball', c: 7 },
+    { id: 1, t: 'rect', x: 200, y: 200, w: 180, h: 80, c: 6, f: 'o', text: 'client', ln: 'solid' },
+    { id: 2, t: 'diamond', x: 540, y: 200, w: 160, h: 110, c: 3, f: 'o', text: 'auth?', ln: 'solid' },
+    { id: 3, t: 'circle', x: 880, y: 200, w: 110, h: 110, c: 4, f: 'o', text: 'db', ln: 'solid' },
+    { id: 4, t: 'triangle', x: 540, y: 470, w: 140, h: 120, c: 1, f: 'i', text: 'err', ln: 'solid' },
+    { id: 5, t: 'rect', x: 200, y: 470, w: 180, h: 80, c: 8, f: 'o', text: 'cache', ln: 'dash' },
+    // client → auth and auth → client run side by side rather than on top of each other.
+    { id: 6, t: 'line', a: { to: 1 }, b: { to: 2 }, head: 'end', pulse: 'fwd', glow: 'ball', c: 0, route: 'straight', ln: 'solid', text: 'login', f: 'i' },
+    { id: 7, t: 'line', a: { to: 2 }, b: { to: 3 }, head: 'end', pulse: 'fwd', glow: 'light', c: 4, route: 'straight', ln: 'solid', text: '', f: 'o' },
+    { id: 8, t: 'line', a: { to: 2 }, b: { to: 4 }, head: 'end', pulse: 'mid', glow: 'ball', c: 1, route: 'straight', ln: 'solid', text: '', f: 'o' },
+    { id: 9, t: 'line', a: { to: 5 }, b: { to: 1 }, head: 'both', pulse: 'rev', glow: 'light', c: 8, route: 'straight', ln: 'solid', text: '', f: 'o' },
+    { id: 10, t: 'line', a: { to: 4 }, b: { to: 5 }, head: 'none', pulse: 'off', glow: 'ball', c: 0, route: 'straight', ln: 'dot', text: '', f: 'o' },
+    { id: 11, t: 'line', a: { x: 760, y: 420 }, b: { x: 1060, y: 420 }, head: 'end', pulse: 'fwd', glow: 'ball', c: 7, route: 'straight', ln: 'solid', text: '', f: 'o' },
+    { id: 12, t: 'line', a: { to: 2 }, b: { to: 1 }, head: 'end', pulse: 'rev', glow: 'ball', c: 2, route: 'straight', ln: 'solid', text: 'token', f: 'i' },
+    { id: 13, t: 'line', a: { to: 3 }, b: { x: 1000, y: 420 }, head: 'end', pulse: 'fwd', glow: 'ball', c: 5, route: 'elbow', ln: 'dash', text: '', f: 'o' },
+    { id: 14, t: 'line', a: { to: 1 }, b: { to: 4 }, head: 'end', pulse: 'off', glow: 'ball', c: 6, route: 'curve', ln: 'solid', text: '', f: 'o' },
+    { id: 15, t: 'line', a: { x: 760, y: 560 }, b: { x: 1060, y: 560 }, head: 'none', pulse: 'off', glow: 'ball', c: 0, route: 'straight', ln: 'solid', text: '', f: 'o' },
   ],
 };
 
@@ -439,11 +444,12 @@ export function mockBackend(): Backend {
     async thumbSave() {
       return true;
     },
-    async exportFile(path, jpeg) {
+    async exportFile(path, bytes) {
       // No disk to write to: the browser downloads it. The last export is also
       // kept on `window`, so a test can look at its bytes.
-      (window as unknown as { __lastExport?: { path: string; jpeg: Uint8Array } }).__lastExport = { path, jpeg };
-      const url = URL.createObjectURL(new Blob([jpeg as BlobPart], { type: 'image/jpeg' }));
+      (window as unknown as { __lastExport?: { path: string; jpeg: Uint8Array } }).__lastExport = { path, jpeg: bytes };
+      const type = /\.png$/i.test(path) ? 'image/png' : /\.svg$/i.test(path) ? 'image/svg+xml' : 'image/jpeg';
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
       const a = document.createElement('a');
       a.href = url;
       a.download = path.split('/').pop() ?? 'export.jpg';

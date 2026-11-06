@@ -59,6 +59,9 @@ describe('format', () => {
     expect(wantsPoster(file({ mime: 'image/heic' }))).toBe(true);
     expect(wantsPoster(file({ mime: 'video/quicktime' }))).toBe(true);
     expect(wantsPoster(file({ mime: 'image/jpeg' }))).toBe(false);
+    // A diagram draws its own thumbnail.
+    expect(wantsPoster(file({ name: 'flow.lin', mime: 'text/x-lin; charset=utf-8' }))).toBe(true);
+    expect(wantsPoster(file({ name: 'flow.lin', blob: null }))).toBe(false);
   });
 
   it('picks a viewer', () => {

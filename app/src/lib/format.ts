@@ -130,13 +130,14 @@ export function hasThumb(item: Item): boolean {
 }
 
 // Drawn by the page instead, from the stream (posters.ts): types the image
-// crate doesn't decode but WebKit does, and video.
+// crate doesn't decode but WebKit does, video, and .lin diagrams.
 const POSTERED = ['image/heic', 'image/heif', 'image/avif', 'image/tiff', 'image/bmp'];
 
 /** May have a thumbnail the page drew; if it hasn't one yet, the page can draw it. */
 export function wantsPoster(item: Item): boolean {
   const mime = baseMime(item.mime);
-  return item.kind === 'file' && item.blob !== null && (mime.startsWith('video/') || POSTERED.includes(mime));
+  // A diagram's thumbnail is the diagram, drawn by the page from the file itself.
+  return item.kind === 'file' && item.blob !== null && (mime.startsWith('video/') || POSTERED.includes(mime) || isLin(item));
 }
 
 export function errorText(e: unknown): string {

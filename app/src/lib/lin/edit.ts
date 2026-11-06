@@ -5,19 +5,23 @@
 // key pressed with a line selected) says why instead of doing nothing, and
 // the editor shows that in its bottom line.
 
-import { capacity, fits, lineEnds, snapTarget, type Pt } from './geometry';
+import { capacity, fits, labelCapacity, labelFits, lineEnds, snapTarget, type Pt } from './geometry';
 import {
   BIG_STEP,
+  COPY_OFFSET,
   FONT_PX,
   HEADS,
   MAX_SIZE,
   MIN_SIZE,
   PALETTE,
   PULSES,
+  ROUTES,
   STEP,
+  STROKES,
   find,
   isAttached,
   isLine,
+  isShape,
   newLine,
   newShape,
   shapeById,
@@ -100,6 +104,46 @@ export function moveLineBy(doc: Doc, id: number, dx: number, dy: number): Doc {
   return replace(doc, { ...l, a: shift(l.a), b: shift(l.b) });
 }
 
+/**
+ * Move several parts at once (a drag, or an ⌥-arrow): shapes by (dx, dy), kept
+ * together on the page, and the free ends of selected lines. Ends on shapes
+ * follow their shapes, so a line between two moved shapes goes with them.
+ */
+export function moveBy(doc: Doc, ids: readonly number[], dx: number, dy: number): Doc {
+  const set = new Set(ids);
+  // However far the group is asked to go, every shape stays wholly on the page.
+  for (const p of doc.items) {
+    if (!set.has(p.id) || !isShape(p)) continue;
+    if (p.w < doc.w) dx = clamp(dx, p.w / 2 - p.x, doc.w - p.w / 2 - p.x);
+    if (p.h < doc.h) dy = clamp(dy, p.h / 2 - p.y, doc.h - p.h / 2 - p.y);
+  }
+  if (dx === 0 && dy === 0) return doc;
+  const shift = (e: End): End => (isAttached(e) ? e : { x: clamp(e.x + dx, 0, doc.w), y: clamp(e.y + dy, 0, doc.h) });
+  return {
+    ...doc,
+    items: doc.items.map((p) => {
+      if (!set.has(p.id)) return p;
+      return isShape(p) ? { ...p, x: p.x + dx, y: p.y + dy } : { ...p, a: shift(p.a), b: shift(p.b) };
+    }),
+  };
+}
+
+/** Do one command to every selected part: it succeeds if it worked on any, and says why if it worked on none. */
+export function each(doc: Doc, ids: readonly number[], make: (doc: Doc, id: number) => Edited): Edited {
+  let now = doc;
+  let why: string | undefined;
+  let any = false;
+  for (const id of ids) {
+    const r = make(now, id);
+    if ('error' in r) why ??= r.error;
+    else {
+      now = r.doc;
+      any = true;
+    }
+  }
+  return any ? { doc: now } : { error: why ?? 'nothing is selected' };
+}
+
 // ── Shapes ──────────────────────────────────────────────────────────────
 
 /** An arrow key on the selected shape. Circles stay round: → and ↑ grow, ← and ↓ shrink. */
@@ -122,28 +166,38 @@ export function resize(doc: Doc, id: number, dir: Dir, big: boolean): Edited {
 }
 
 export function setFont(doc: Doc, id: number, f: FontKey): Edited {
-  const s = shapeById(doc, id);
-  if (!s) return { error: 'select a shape to change its font' };
-  if (s.f === f) return { doc };
-  const next: Shape = { ...s, f };
-  if (!fits(next) && fits(s)) return { error: "the text wouldn't fit at that size: make the shape bigger first" };
+  const p = find(doc, id);
+  if (!p) return { error: 'select a shape or line to change its font' };
+  if (p.f === f) return { doc };
+  if (isLine(p)) {
+    const next: Line = { ...p, f };
+    if (!labelFits(doc, next) && labelFits(doc, p)) return { error: "the label wouldn't fit at that size" };
+    return { doc: replace(doc, next) };
+  }
+  const next: Shape = { ...p, f };
+  if (!fits(next) && fits(p)) return { error: "the text wouldn't fit at that size: make the shape bigger first" };
   return { doc: replace(doc, next) };
 }
 
-/** Add one character to the shape's text, if it still fits. */
+/** Add one character to the text of a shape (or the label of a line), if it still fits. */
 export function typeChar(doc: Doc, id: number, ch: string): Edited {
-  const s = shapeById(doc, id);
-  if (!s) return { error: 'select a shape to type in it' };
-  const next: Shape = { ...s, text: s.text + ch };
-  if (!fits(next)) return { error: `no room: it holds up to ${capacity(s)} at this size; a bigger shape or a smaller font (i) holds more` };
+  const p = find(doc, id);
+  if (!p) return { error: 'select a shape or line to type in it' };
+  if (isLine(p)) {
+    const next: Line = { ...p, text: p.text + ch };
+    if (!labelFits(doc, next)) return { error: `no room: a label holds up to ${labelCapacity(doc, p)} here at this size (i is smaller)` };
+    return { doc: replace(doc, next) };
+  }
+  const next: Shape = { ...p, text: p.text + ch };
+  if (!fits(next)) return { error: `no room: it holds up to ${capacity(p)} at this size; a bigger shape or a smaller font (i) holds more` };
   return { doc: replace(doc, next) };
 }
 
 export function backspace(doc: Doc, id: number): Edited {
-  const s = shapeById(doc, id);
-  if (!s) return { error: 'select a shape to type in it' };
-  if (s.text === '') return { doc };
-  return { doc: replace(doc, { ...s, text: [...s.text].slice(0, -1).join('') }) };
+  const p = find(doc, id);
+  if (!p) return { error: 'select a shape or line to type in it' };
+  if (p.text === '') return { doc };
+  return { doc: replace(doc, { ...p, text: [...p.text].slice(0, -1).join('') }) };
 }
 
 // ── Lines ───────────────────────────────────────────────────────────────
@@ -180,7 +234,100 @@ export function toggleGlow(doc: Doc, id: number): Edited {
   return { doc: replace(doc, { ...l, glow: l.glow === 'ball' ? 'light' : 'ball' }) };
 }
 
+/** Straight → curved → square-cornered. */
+export function cycleRoute(doc: Doc, id: number): Edited {
+  const l = lineById(doc, id);
+  if (!l) return { error: 'select a line to bend it' };
+  return { doc: replace(doc, { ...l, route: cycle(ROUTES, l.route) }) };
+}
+
 // ── Either ──────────────────────────────────────────────────────────────
+
+/** Solid → dashed → dotted, for a shape's outline or a line. */
+export function cycleStroke(doc: Doc, id: number): Edited {
+  const p = find(doc, id);
+  if (!p) return { error: 'select something to change its outline' };
+  return { doc: replace(doc, { ...p, ln: cycle(STROKES, p.ln) }) };
+}
+
+/** Move parts in the stacking order: one step toward the front or back, or all the way. */
+export function reorder(doc: Doc, ids: readonly number[], to: 'up' | 'down' | 'front' | 'back'): Edited {
+  const set = new Set(ids);
+  const chosen = doc.items.filter((p) => set.has(p.id));
+  if (chosen.length === 0) return { error: 'nothing is selected' };
+  let items = [...doc.items];
+  if (to === 'front') items = [...items.filter((p) => !set.has(p.id)), ...chosen];
+  else if (to === 'back') items = [...chosen, ...items.filter((p) => !set.has(p.id))];
+  else if (to === 'up') {
+    for (let i = items.length - 2; i >= 0; i--) if (set.has(items[i].id) && !set.has(items[i + 1].id)) [items[i], items[i + 1]] = [items[i + 1], items[i]];
+  } else {
+    for (let i = 1; i < items.length; i++) if (set.has(items[i].id) && !set.has(items[i - 1].id)) [items[i], items[i - 1]] = [items[i - 1], items[i]];
+  }
+  if (items.every((p, i) => p === doc.items[i])) return { error: to === 'up' || to === 'front' ? 'already at the front' : 'already at the back' };
+  return { doc: { ...doc, items } };
+}
+
+/**
+ * The parts to copy: `ids` in stacking order. A line whose end is on a shape
+ * that isn't being copied keeps the point it ended at, since that shape
+ * won't be where the copy goes.
+ */
+export function copyParts(doc: Doc, ids: readonly number[]): Part[] {
+  const set = new Set(ids);
+  const shapes = new Set(doc.items.filter((p) => set.has(p.id) && isShape(p)).map((p) => p.id));
+  return doc.items
+    .filter((p) => set.has(p.id))
+    .map((p) => {
+      if (!isLine(p)) return p;
+      const ends = lineEnds(doc, p);
+      const keep = (e: End, at: Pt): End => (isAttached(e) && !shapes.has(e.to) ? { x: at.x, y: at.y } : e);
+      return { ...p, a: keep(p.a, ends.a), b: keep(p.b, ends.b) };
+    });
+}
+
+/**
+ * Put copies of `parts` on the page, moved by `delta`, at the front. Lines
+ * between copied shapes join the copies; a line end on a shape that's still
+ * in this doc but wasn't copied stays on it (duplicating a lone line makes a
+ * second line between the same shapes, which runs beside the first).
+ */
+export function pasteParts(doc: Doc, parts: readonly Part[], delta: Pt): { doc: Doc; ids: number[] } {
+  if (parts.length === 0) return { doc, ids: [] };
+  let { x: dx, y: dy } = delta;
+  for (const p of parts) {
+    if (!isShape(p)) continue;
+    if (p.w < doc.w) dx = clamp(dx, p.w / 2 - p.x, doc.w - p.w / 2 - p.x);
+    if (p.h < doc.h) dy = clamp(dy, p.h / 2 - p.y, doc.h - p.h / 2 - p.y);
+  }
+  const fresh = new Map<number, number>();
+  let next = doc.next;
+  for (const p of parts) fresh.set(p.id, next++);
+  const end = (e: End): End => {
+    if (isAttached(e)) {
+      const to = fresh.get(e.to);
+      if (to !== undefined && parts.some((p) => p.id === e.to && isShape(p))) return { to };
+      return shapeById(doc, e.to) ? e : { x: doc.w / 2, y: doc.h / 2 };
+    }
+    return { x: clamp(e.x + dx, 0, doc.w), y: clamp(e.y + dy, 0, doc.h) };
+  };
+  const made: Part[] = parts.map((p) =>
+    isShape(p) ? { ...p, id: fresh.get(p.id)!, x: p.x + dx, y: p.y + dy } : { ...p, id: fresh.get(p.id)!, a: end(p.a), b: end(p.b) },
+  );
+  return { doc: { ...doc, next, items: [...doc.items, ...made] }, ids: made.map((p) => p.id) };
+}
+
+/** ⌘D: a copy of the selection a little way off, where it can be seen and dragged. */
+export function duplicate(doc: Doc, ids: readonly number[]): { doc: Doc; ids: number[] } | { error: string } {
+  const set = new Set(ids);
+  const parts = doc.items.filter((p) => set.has(p.id));
+  if (parts.length === 0) return { error: 'select something to duplicate it' };
+  return pasteParts(doc, parts, { x: COPY_OFFSET, y: COPY_OFFSET });
+}
+
+/** Delete several parts. */
+export function removeMany(doc: Doc, ids: readonly number[]): Doc {
+  return ids.reduce((d, id) => remove(d, id), doc);
+}
 
 export function recolor(doc: Doc, id: number, c: number): Edited {
   const p = find(doc, id);
@@ -221,14 +368,17 @@ const FONT_NAME: Record<FontKey, string> = { i: 'small', o: 'medium', p: 'large'
 /** One line about the selection for the editor's status row. */
 export function describe(part: Part): string {
   const colour = PALETTE[part.c].name;
+  const outline = part.ln === 'solid' ? '' : ` · ${part.ln === 'dash' ? 'dashed' : 'dotted'}`;
   if (isLine(part)) {
     const head = part.head === 'none' ? 'line' : part.head === 'end' ? 'arrow' : 'double arrow';
     const pulse =
       part.pulse === 'off' ? 'still' : part.pulse === 'mid' ? 'pulse from the middle' : part.pulse === 'fwd' ? 'pulse a→b' : 'pulse b→a';
-    return `${head} · ${colour} · ${pulse}${part.pulse === 'off' ? '' : ` · ${part.glow}`}`;
+    const route = part.route === 'straight' ? '' : ` · ${part.route === 'curve' ? 'curved' : 'square'}`;
+    const label = part.text === '' ? '' : ` · label ${[...part.text].length} chars`;
+    return `${head} · ${colour} · ${pulse}${part.pulse === 'off' ? '' : ` · ${part.glow}`}${route}${outline}${label}`;
   }
   const chars = [...part.text].length;
-  return `${part.t} · ${colour} · ${FONT_NAME[part.f]} ${FONT_PX[part.f]}px · ${part.w}×${part.h} · ${chars}/${capacity(part)} chars`;
+  return `${part.t} · ${colour} · ${FONT_NAME[part.f]} ${FONT_PX[part.f]}px · ${part.w}×${part.h} · ${chars}/${capacity(part)} chars${outline}`;
 }
 
 // ── Undo ────────────────────────────────────────────────────────────────

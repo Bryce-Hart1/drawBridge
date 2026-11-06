@@ -17,7 +17,7 @@ in development.
 - the desktop app (Tauri): a monochrome, terminal-style window for browsing,
   uploading (picker or drag-and-drop, folders included), downloading, moving,
   renaming, deleting, notes, `.lin` diagrams (keyboard-drawn, animated, exported
-  as JPEG), search across every folder, and photo thumbnails
+  as JPEG, PNG or SVG), search across every folder, and photo thumbnails
 - streaming and previews: photos full size, audio and video that play and seek
   without downloading the whole file, PDFs, code as text, video posters and
   HEIC thumbnails, through a capped on-disk cache
@@ -142,36 +142,56 @@ Enter opens a file where it can be read:
 ### Diagrams
 
 A `.lin` file is a diagram: circles, triangles, rectangles and diamonds, joined
-by lines and arrows. It opens playing, with its lines pulsing; `e` switches to
-editing. `l` on the main screen starts a new one (so `l` no longer moves right;
-use `→` or Enter), and so does `n` with a name ending in `.lin`. Everything is a
-key except where things go, which is the mouse: a shape key arms a tool and the
+by lines. It opens playing, with its lines pulsing; `e` switches to editing.
+`l` on the main screen starts a new one (so `l` no longer moves right; use `→`
+or Enter), and so does `n` with a name ending in `.lin`. Everything is a key
+except where things go, which is the mouse: a shape key arms a tool and the
 next click places it, and dragging moves a shape or one end of a line. Drop an
 end on a shape and it stays attached when the shape moves.
+
+A new line is plain; arrowheads are something you add to it (`a`: none, then
+one arrow, then two). Lines that join the same two shapes, such as one from A
+to B and one from B to A, are drawn side by side rather than on top of each
+other. A line can be straight, curved or square-cornered (`b`), solid, dashed
+or dotted (`w`), and carry a short label (select it, then Enter).
 
 | Keys | Does |
 |---|---|
 | `c` `t` `r` `d` | place a circle, triangle, rectangle or diamond (then click) |
 | `l` | draw a line: click where it starts, then where it ends |
 | `tab` `⇧tab` | select the next, previous part |
+| click, `⇧` click | select; `⇧` adds a part to the selection or takes it out |
+| drag on empty page | select everything the box touches |
+| `⌘A` | select everything |
 | `←` `→` `↑` `↓` | resize the shape (`⇧` for bigger steps) |
+| `⌥` + arrows | move the selection 10 px (`⇧` as well for 1 px) |
 | `0`–`9` | colour: a see-through wash with a solid outline (`0` is plain, in the page's colour) |
-| `i` `o` `p` | small, medium, large text |
-| `⏎` | type in the shape; `⏎` or `esc` finishes. It stops when the text no longer fits, and a shape won't shrink, or the font grow, past its text |
+| `i` `o` `p` | small, medium, large text (for a line, its label) |
+| `⏎` | type in the shape, or the label of a line; `⏎` or `esc` finishes. It stops when the text no longer fits, and a shape won't shrink, or the font grow, past its text |
 | `a` | line → arrow → double arrow |
 | `f` | flip a line's direction |
+| `b` | bend a line: straight → curved → square corners |
+| `w` | outline: solid → dashed → dotted (shapes and lines) |
 | `m` | pulse: off → start to end → end to start → out from the middle |
 | `s` | pulse as a ball, or as a light inside the line |
+| `[` `]` | send back, bring forward one step (`⇧` for all the way) |
+| `⌘D` | duplicate, a little way off |
+| `⌘C` `⌘V` | copy, and paste where the pointer is (into another diagram too) |
+| `g` | snap to a 10 px grid; shapes also line up with each other, with a guide. Hold `⌥` while dragging to skip both |
+| `+` `-` `z` | zoom in, out, fit the page. The wheel or a trackpad moves the page, and `⌘` or a pinch zooms. Dragging moves it while you're only viewing |
 | `⌫` | delete (lines on a deleted shape stay where they ended) |
 | `⌘Z` `⇧⌘Z` | undo, redo |
 | `⌘S` | save, as a new version of the file, like a note |
-| `x` | export a JPEG (cropped to the drawing, on white, at twice the size) |
+| `x` | export. The file name you choose sets the format: `.jpg`, `.png` or `.svg` (cropped to the drawing, on white; images at twice the size) |
 | `space` | pause or play the animation |
 | `esc` | cancel the tool, deselect, close |
 
 A `.lin` is JSON text with one part per line, so it syncs like any note. The
 format is read and written in `app/src/lib/lin/format.ts`; a file from a newer
-drawBridge is refused by name rather than half-read.
+drawBridge is refused by name rather than half-read. Dashes, bends and labels
+are only written when a part uses them, so a plain diagram's file is the same as
+it always was. In the folder list a diagram's thumbnail is the diagram itself,
+drawn the first time it's selected.
 
 Files are read through a small HTTP server on `127.0.0.1`. It starts the first
 time something is opened and stops after ten idle minutes, and its URLs carry a

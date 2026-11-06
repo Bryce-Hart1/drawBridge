@@ -108,3 +108,44 @@ describe('parseLin', () => {
     expect(() => parseLin(`{"lin":1,"items":[${rect},${line}]}`)).toThrow(/pulse should be one of/);
   });
 });
+
+describe('dashes, routes and labels', () => {
+  it('round-trips them', () => {
+    const text = [
+      '{"lin":1,"w":1200,"h":800,"next":4,"items":[',
+      ' {"id":1,"t":"rect","x":100,"y":100,"w":160,"h":80,"c":0,"f":"o","text":"a","ln":"dash"},',
+      ' {"id":2,"t":"rect","x":400,"y":100,"w":160,"h":80,"c":0,"f":"o","text":""},',
+      ' {"id":3,"t":"line","a":{"to":1},"b":{"to":2},"head":"both","pulse":"off","glow":"ball","c":2,"route":"elbow","ln":"dot","text":"yes","f":"i"}',
+      ']}',
+      '',
+    ].join('\n');
+    const doc = parseLin(text);
+    expect(doc.items[0]).toMatchObject({ ln: 'dash' });
+    expect(doc.items[2]).toMatchObject({ route: 'elbow', ln: 'dot', text: 'yes', f: 'i' });
+    expect(serializeLin(doc)).toBe(text);
+  });
+
+  it('leaves them out of the file when they are the default, so old files are unchanged', () => {
+    const old =
+      '{"lin":1,"w":1200,"h":800,"next":3,"items":[\n' +
+      ' {"id":1,"t":"rect","x":100,"y":100,"w":160,"h":80,"c":0,"f":"o","text":""},\n' +
+      ' {"id":2,"t":"line","a":{"to":1},"b":{"x":500,"y":100},"head":"end","pulse":"fwd","glow":"ball","c":0}\n' +
+      ']}\n';
+    const doc = parseLin(old);
+    expect(doc.items[1]).toMatchObject({ route: 'straight', ln: 'solid', text: '', f: 'o', head: 'end' });
+    expect(serializeLin(doc)).toBe(old);
+  });
+
+  it('reads a line with no head as a plain line', () => {
+    const doc = parseLin('{"lin":1,"items":[{"id":1,"t":"line","a":{"x":1,"y":1},"b":{"x":50,"y":50}}]}');
+    expect(doc.items[0]).toMatchObject({ head: 'none' });
+  });
+
+  it('refuses an unknown route or outline, and cuts a long label', () => {
+    expect(() => parseLin('{"lin":1,"items":[{"id":1,"t":"line","a":{"x":1,"y":1},"b":{"x":5,"y":5},"route":"loop"}]}')).toThrow(/route/);
+    expect(() => parseLin('{"lin":1,"items":[{"id":1,"t":"rect","x":1,"y":1,"w":50,"h":50,"ln":"wavy"}]}')).toThrow(/ln/);
+    const long = 'x'.repeat(100);
+    const doc = parseLin(`{"lin":1,"items":[{"id":1,"t":"line","a":{"x":1,"y":1},"b":{"x":5,"y":5},"text":"${long}"}]}`);
+    expect([...(doc.items[0] as { text: string }).text]).toHaveLength(40);
+  });
+});

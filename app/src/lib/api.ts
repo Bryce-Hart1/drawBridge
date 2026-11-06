@@ -47,8 +47,8 @@ export interface Backend {
   cacheClear(): Promise<CacheInfo>;
   /** Keep a thumbnail drawn here. Returns whether other devices get it too. */
   thumbSave(blob: string, jpeg: Uint8Array): Promise<boolean>;
-  /** Write a JPEG (an exported .lin diagram) to a path from `pickSavePath`. */
-  exportFile(path: string, jpeg: Uint8Array): Promise<void>;
+  /** Write an exported .lin diagram (a JPEG, PNG or SVG, as the path's extension says) to a path from `pickSavePath`. */
+  exportFile(path: string, bytes: Uint8Array): Promise<void>;
 
   /** A URL an `<img>` can load the blob's thumbnail from. `v` busts a cached miss. */
   thumbUrl(blob: string, v?: number): string;
@@ -89,8 +89,8 @@ function tauri(): Backend {
     thumbSave: (blob, jpeg) => invoke<boolean>('thumb_save', { blob, jpeg: Array.from(jpeg) }),
     // The bytes are the request body (a JSON number array would be slow for megabytes);
     // the path rides in a header, as hex, since headers are ASCII.
-    exportFile: (path, jpeg) =>
-      invoke<void>('export_file', jpeg, {
+    exportFile: (path, bytes) =>
+      invoke<void>('export_file', bytes, {
         headers: { 'x-path': Array.from(new TextEncoder().encode(path), (b) => b.toString(16).padStart(2, '0')).join('') },
       }),
 

@@ -93,6 +93,46 @@ describe('editing keys', () => {
   });
 });
 
+describe('the rest of the editing keys', () => {
+  it('bends, restyles, snaps and reorders', () => {
+    expect(cmd('b')).toEqual({ do: 'route' });
+    expect(cmd('w')).toEqual({ do: 'style' });
+    expect(cmd('g')).toEqual({ do: 'grid' });
+    expect(cmd(']')).toEqual({ do: 'order', to: 'up' });
+    expect(cmd('[')).toEqual({ do: 'order', to: 'down' });
+    expect(cmd('}', EDIT, { shiftKey: true })).toEqual({ do: 'order', to: 'front' });
+    expect(cmd('{', EDIT, { shiftKey: true })).toEqual({ do: 'order', to: 'back' });
+  });
+
+  it('moves with ⌥ and the arrows: 10 px, or 1 with shift', () => {
+    expect(cmd('ArrowLeft', EDIT, { altKey: true })).toEqual({ do: 'nudge', dir: 'left', fine: false });
+    expect(cmd('ArrowDown', EDIT, { altKey: true, shiftKey: true })).toEqual({ do: 'nudge', dir: 'down', fine: true });
+    expect(cmd('ArrowLeft', VIEW, { altKey: true })).toBeNull();
+    expect(cmd('ArrowLeft', TYPING, { altKey: true })).toBeNull();
+  });
+
+  it('copies, pastes, duplicates and selects all with ⌘', () => {
+    expect(cmd('c', EDIT, { metaKey: true })).toEqual({ do: 'copy' });
+    expect(cmd('v', EDIT, { metaKey: true })).toEqual({ do: 'paste' });
+    expect(cmd('d', EDIT, { ctrlKey: true })).toEqual({ do: 'duplicate' });
+    expect(cmd('a', EDIT, { metaKey: true })).toEqual({ do: 'all' });
+    for (const k of ['c', 'v', 'd', 'a']) {
+      expect(cmd(k, VIEW, { metaKey: true })).toBeNull();
+      expect(cmd(k, TYPING, { metaKey: true })).toBeNull();
+    }
+  });
+
+  it('zooms with + - and z, viewing or editing, but not while typing', () => {
+    for (const mode of [EDIT, VIEW]) {
+      expect(cmd('=', mode)).toEqual({ do: 'zoom', by: 'in' });
+      expect(cmd('+', mode, { shiftKey: true })).toEqual({ do: 'zoom', by: 'in' });
+      expect(cmd('-', mode)).toEqual({ do: 'zoom', by: 'out' });
+      expect(cmd('z', mode)).toEqual({ do: 'zoom', by: 'fit' });
+    }
+    expect(cmd('-', TYPING)).toEqual({ do: 'char', ch: '-' });
+  });
+});
+
 describe('viewing', () => {
   it('only plays, exports, edits and closes', () => {
     expect(cmd(' ', VIEW)).toEqual({ do: 'play' });
@@ -140,6 +180,7 @@ describe('hints', () => {
     'nothing selected': base,
     'a shape': { ...base, selected: 'shape' },
     'a line': { ...base, selected: 'line' },
+    'several parts': { ...base, selected: 'many' },
     'a tool armed': { ...base, armed: true },
     typing: { ...base, typing: true },
   };
@@ -166,6 +207,8 @@ describe('hints', () => {
     expect(words({ ...base, selected: 'shape' })).toContain('font');
     expect(words({ ...base, selected: 'shape' })).not.toContain('arrowheads');
     expect(words({ ...base, selected: 'line' })).toContain('arrowheads');
-    expect(words({ ...base, selected: 'line' })).not.toContain('font');
+    expect(words({ ...base, selected: 'line' })).toContain('bend');
+    expect(words({ ...base, selected: 'line' })).not.toContain('size');
+    expect(words({ ...base, selected: 'many' })).toContain('duplicate');
   });
 });
