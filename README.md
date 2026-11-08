@@ -167,7 +167,7 @@ or dotted (`w`), and carry a short label (select it, then Enter).
 | `⌥` + arrows | move the selection 10 px (`⇧` as well for 1 px) |
 | `0`–`9` | colour: a see-through wash with a solid outline (`0` is plain, in the page's colour) |
 | `i` `o` `p` | small, medium, large text (for a line, its label) |
-| `⏎` | type in the shape, or the label of a line; `⏎` or `esc` finishes. It stops when the text no longer fits, and a shape won't shrink, or the font grow, past its text |
+| `⏎` | type in the shape, or the label of a line. In a shape `⏎` starts a new line, so a list is one item per row (typing `\n` does the same, and the two characters become the break); `esc` finishes, and `⏎` finishes a line's one-row label. It stops when the text no longer fits, and a shape won't shrink, or the font grow, past its text |
 | `a` | line → arrow → double arrow |
 | `f` | flip a line's direction |
 | `b` | bend a line: straight → curved → square corners |

@@ -179,16 +179,20 @@ export function setFont(doc: Doc, id: number, f: FontKey): Edited {
   return { doc: replace(doc, next) };
 }
 
-/** Add one character to the text of a shape (or the label of a line), if it still fits. */
+/** Add one character to the text of a shape (or the label of a line), if it still fits. A newline starts a new line in a shape. */
 export function typeChar(doc: Doc, id: number, ch: string): Edited {
   const p = find(doc, id);
   if (!p) return { error: 'select a shape or line to type in it' };
   if (isLine(p)) {
+    // A label is one row.
+    if (ch === '\n') return { error: 'a label is one row' };
     const next: Line = { ...p, text: p.text + ch };
     if (!labelFits(doc, next)) return { error: `no room: a label holds up to ${labelCapacity(doc, p)} here at this size (i is smaller)` };
     return { doc: replace(doc, next) };
   }
-  const next: Shape = { ...p, text: p.text + ch };
+  // Typing \n (a backslash, then n) is another way to start a new line: the two characters become one break.
+  const text = ch === 'n' && p.text.endsWith('\\') ? `${p.text.slice(0, -1)}\n` : p.text + ch;
+  const next: Shape = { ...p, text };
   if (!fits(next)) return { error: `no room: it holds up to ${capacity(p)} at this size; a bigger shape or a smaller font (i) holds more` };
   return { doc: replace(doc, next) };
 }

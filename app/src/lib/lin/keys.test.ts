@@ -155,6 +155,13 @@ describe('typing', () => {
     expect(cmd('Backspace', TYPING)).toEqual({ do: 'backspace' });
   });
 
+  it('starts a new line on Enter in a shape, where a one-row label ends instead', () => {
+    const list = { edit: true, typing: true, multiline: true };
+    expect(cmd('Enter', list)).toEqual({ do: 'char', ch: '\n' });
+    expect(cmd('Escape', list)).toEqual({ do: 'done' });
+    expect(cmd('Enter', TYPING)).toEqual({ do: 'done' });
+  });
+
   it('ignores keys that are not text, but still saves', () => {
     expect(cmd('ArrowLeft', TYPING)).toBeNull();
     expect(cmd('Tab', TYPING)).toBeNull();
@@ -183,6 +190,7 @@ describe('hints', () => {
     'several parts': { ...base, selected: 'many' },
     'a tool armed': { ...base, armed: true },
     typing: { ...base, typing: true },
+    'typing in a shape': { ...base, typing: true, multiline: true },
   };
 
   for (const [name, ctx] of Object.entries(contexts)) {
@@ -196,6 +204,12 @@ describe('hints', () => {
       }
     });
   }
+
+  it('says what Enter does while typing', () => {
+    const enter = (multiline: boolean) => hintsFor({ ...base, typing: true, multiline }).find((h) => h.label === '⏎')?.word;
+    expect(enter(true)).toBe('new line');
+    expect(enter(false)).toBe('done');
+  });
 
   it('says pause while playing and play while paused', () => {
     expect(hintsFor(base).find((h) => h.label === 'space')?.word).toBe('pause');

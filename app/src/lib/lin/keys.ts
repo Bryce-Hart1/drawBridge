@@ -1,6 +1,7 @@
 // Claude — Date 11/05/2026
 // The diagram editor's keys. Everything is a key except where things go, which
-// is the mouse. Pressing Enter on a shape types into it; until Enter or Esc,
+// is the mouse. Pressing Enter on a shape types into it; until Esc (or Enter,
+// on a line's one-row label, since Enter in a shape starts a new line),
 // every key is a letter, so `i`, `o`, `p` and the digits are free to be both
 // text and commands without clashing.
 //
@@ -56,6 +57,8 @@ export interface Mode {
   edit: boolean;
   /** Typing into a shape. */
   typing: boolean;
+  /** Typing into a shape, where Enter starts a new line (a label on a line is one row, so Enter ends it). */
+  multiline?: boolean;
 }
 
 const ARM: Record<string, ShapeKind | 'line'> = { c: 'circle', t: 'triangle', r: 'rect', d: 'diamond', l: 'line' };
@@ -88,7 +91,8 @@ export function commandFor(e: KeyEvent, mode: Mode): Command | null {
   }
 
   if (mode.typing) {
-    if (e.key === 'Enter' || e.key === 'Escape') return { do: 'done' };
+    if (e.key === 'Enter') return mode.multiline ? { do: 'char', ch: '\n' } : { do: 'done' };
+    if (e.key === 'Escape') return { do: 'done' };
     if (e.key === 'Backspace') return { do: 'backspace' };
     return isTypable(e.key) ? { do: 'char', ch: e.key } : null;
   }
@@ -158,6 +162,9 @@ const h = (label: string, word: string, press: string | null, does: Command['do'
 
 /** The keys worth showing right now: what the selection can do, and the always-there ones. */
 export function hintsFor(c: Context): Hint[] {
+  if (c.typing && c.multiline) {
+    return [h('⏎', 'new line', 'Enter', 'char'), h('esc', 'done', 'Escape', 'done'), h('⌫', 'delete', 'Backspace', 'backspace')];
+  }
   if (c.typing) return [h('⏎', 'done', 'Enter', 'done'), h('esc', 'done', 'Escape', 'done'), h('⌫', 'delete', 'Backspace', 'backspace')];
   const play = h('space', c.playing ? 'pause' : 'play', ' ', 'play');
   const zoom = h('+ -', 'zoom', '=', 'zoom');

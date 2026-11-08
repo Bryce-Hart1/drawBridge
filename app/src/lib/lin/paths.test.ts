@@ -16,7 +16,8 @@ import {
   tipFrom,
   bounds,
 } from './geometry';
-import { blankDoc, find, type Doc, type Line } from './model';
+import { blankDoc, find, newShape, type Doc, type Line } from './model';
+import { fits, layout, wrap } from './geometry';
 
 function ok(e: Edited): Doc {
   if ('error' in e) throw new Error(`refused: ${e.error}`);
@@ -210,5 +211,33 @@ describe('clicking and boxing a curve or a group', () => {
     const doc = joined(two(), 1, 2);
     expect(bounds(doc, [2])).toEqual({ x: 320, y: 60, w: 160, h: 80 });
     expect(bounds(doc, [])).toBeNull();
+  });
+});
+
+describe('lists: a line break in a shape', () => {
+  const rect = (text: string) => ({ ...newShape(1, 'rect', 300, 300), text });
+
+  it('starts a new line at each break, even when the words would fit on one', () => {
+    expect(wrap('one\ntwo\nthree', 20)).toEqual(['one', 'two', 'three']);
+    expect(wrap('a b\nc d', 20)).toEqual(['a b', 'c d']);
+  });
+
+  it('keeps a blank line between items, and one after a trailing break', () => {
+    expect(wrap('one\n\ntwo', 20)).toEqual(['one', '', 'two']);
+    expect(wrap('one\n', 20)).toEqual(['one', '']);
+    expect(wrap('\n', 20)).toEqual(['', '']);
+  });
+
+  it('still wraps a long item on its own', () => {
+    expect(wrap('aaaa bbbb\ncc', 5)).toEqual(['aaaa', 'bbbb', 'cc']);
+  });
+
+  it('counts every row against the room in the shape', () => {
+    // A 160×80 rectangle holds 2 rows at the medium font.
+    expect(layout(rect('a\nb'))).toEqual(['a', 'b']);
+    expect(fits(rect('a\nb'))).toBe(true);
+    expect(fits(rect('a\nb\nc'))).toBe(false);
+    // Breaks alone take up rows too.
+    expect(fits(rect('\n\n'))).toBe(false);
   });
 });

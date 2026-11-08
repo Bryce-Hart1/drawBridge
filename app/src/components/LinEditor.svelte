@@ -95,7 +95,9 @@
   const primary = $derived(sel.length > 0 ? sel[sel.length - 1] : null);
   const selPart = $derived(find(doc, primary));
   const selKind = $derived(sel.length > 1 ? 'many' : selPart ? (isLine(selPart) ? 'line' : 'shape') : null);
-  const hints = $derived(hintsFor({ edit, typing, selected: selKind, armed: armed !== null, playing }));
+  /** Typing in a shape, where Enter starts a new line; a line's label is one row. */
+  const multiline = $derived(typing && !!selPart && !isLine(selPart));
+  const hints = $derived(hintsFor({ edit, typing, multiline, selected: selKind, armed: armed !== null, playing }));
 
   const status = $derived.by(() => {
     if (loading) return 'loading…';
@@ -103,7 +105,7 @@
       const n = [...selPart.text].length;
       return isLine(selPart)
         ? `typing a label · ${n}/${labelCapacity(doc, selPart)} characters fit`
-        : `typing · ${n}/${capacity(selPart)} characters fit`;
+        : `typing · ${n}/${capacity(selPart)} characters fit · enter starts a new line, esc finishes`;
     }
     if (armed === 'line') return lineFrom ? 'click where the line ends' : 'click where the line starts';
     if (armed) return `click to place the ${armed}`;
@@ -475,7 +477,7 @@
   function onkeydown(e: KeyboardEvent) {
     // A prompt (discard changes?) has the keys; so does an input it just closed on.
     if (ui.prompt || e.defaultPrevented) return;
-    const c = commandFor(e, { edit, typing });
+    const c = commandFor(e, { edit, typing, multiline });
     // Typing eats every key, so Tab or an arrow doesn't wander off.
     if (c || (typing && !e.metaKey && !e.ctrlKey)) e.preventDefault();
     if (c) run(c);

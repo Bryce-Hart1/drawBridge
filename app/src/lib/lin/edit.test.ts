@@ -179,6 +179,33 @@ describe('text', () => {
     expect('doc' in backspace(ok(backspace(ok(backspace(doc, 1)), 1)), 1)).toBe(true);
   });
 
+  it('makes a list: a newline starts a new row, and is refused when the rows run out', () => {
+    let doc = addShape(blankDoc(), 'rect', { x: 300, y: 300 }).doc;
+    for (const ch of 'milk\neggs') doc = ok(typeChar(doc, 1, ch));
+    expect(shapeById(doc, 1)!.text).toBe('milk\neggs');
+    // Two rows fit in 160×80; a third doesn't.
+    expect(typeChar(doc, 1, '\n')).toHaveProperty('error');
+    // Four backspaces take off "eggs"; one more takes the break out, so the rows rejoin.
+    let joined = doc;
+    for (let i = 0; i < 4; i++) joined = ok(backspace(joined, 1));
+    expect(shapeById(joined, 1)!.text).toBe('milk\n');
+    expect(shapeById(ok(backspace(joined, 1)), 1)!.text).toBe('milk');
+  });
+
+  it('turns a typed backslash and n into one line break', () => {
+    let doc = addShape(blankDoc(), 'rect', { x: 300, y: 300 }).doc;
+    for (const ch of 'milk\\neggs') doc = ok(typeChar(doc, 1, ch));
+    expect(shapeById(doc, 1)!.text).toBe('milk\neggs');
+    // A backslash on its own stays until an n follows it.
+    doc = addShape(blankDoc(), 'rect', { x: 300, y: 300 }).doc;
+    doc = ok(typeChar(ok(typeChar(doc, 1, 'a')), 1, '\\'));
+    expect(shapeById(doc, 1)!.text).toBe('a\\');
+  });
+
+  it('keeps a label on a line to one row', () => {
+    expect(typeChar(pair(), 3, '\n')).toEqual({ error: 'a label is one row' });
+  });
+
   it('labels a line, up to what fits along it', () => {
     // The two rectangles are 140 px apart: 11 medium characters and some padding.
     let doc = pair();

@@ -86,9 +86,16 @@ export function capacity(s: Shape): number {
 /**
  * Break `text` into lines of at most `cols` characters, at spaces where it
  * can and in the middle of a word where a word is longer than a line.
- * Runs of spaces count as one.
+ * Runs of spaces count as one. A newline always starts a new line (so a list
+ * is one item to a line), and an empty line between two is kept.
  */
 export function wrap(text: string, cols: number): string[] {
+  if (text === '') return [];
+  if (text.includes('\n')) return text.split('\n').flatMap((part) => (part.trim() === '' ? [''] : wrapParagraph(part, cols)));
+  return wrapParagraph(text, cols);
+}
+
+function wrapParagraph(text: string, cols: number): string[] {
   if (cols <= 0) return text.trim() === '' ? [] : [text];
   const lines: string[] = [];
   let line: string[] = [];
@@ -122,7 +129,7 @@ export function layout(s: Shape): string[] {
 /** Whether the shape's text fits in the shape, at its size and font. */
 export function fits(s: Shape): boolean {
   if ([...s.text].length > MAX_TEXT) return false;
-  if (s.text.trim() === '') return true;
+  if (s.text.trim() === '' && !s.text.includes('\n')) return true;
   const { cols, rows } = grid(s);
   return cols > 0 && layout(s).length <= rows;
 }

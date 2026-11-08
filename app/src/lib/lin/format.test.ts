@@ -149,3 +149,12 @@ describe('dashes, routes and labels', () => {
     expect([...(doc.items[0] as { text: string }).text]).toHaveLength(40);
   });
 });
+
+describe('lists in a shape', () => {
+  it('round-trips line breaks in the text', () => {
+    const doc = parseLin('{"lin":1,"items":[{"id":1,"t":"rect","x":300,"y":300,"w":200,"h":120,"text":"milk\\neggs\\n"}]}');
+    expect((doc.items[0] as { text: string }).text).toBe('milk\neggs\n');
+    expect(parseLin(serializeLin(doc)).items[0]).toEqual(doc.items[0]);
+    expect(serializeLin(doc)).toContain('"text":"milk\\neggs\\n"');
+  });
+});
