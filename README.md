@@ -168,6 +168,8 @@ or dotted (`w`), and carry a short label (select it, then Enter).
 | `0`–`9` | colour: a see-through wash with a solid outline (`0` is plain, in the page's colour) |
 | `i` `o` `p` | small, medium, large text (for a line, its label) |
 | `⏎` | type in the shape, or the label of a line. In a shape `⏎` starts a new line, so a list is one item per row (typing `\n` does the same, and the two characters become the break); `esc` finishes, and `⏎` finishes a line's one-row label. It stops when the text no longer fits, and a shape won't shrink, or the font grow, past its text |
+| `←` `→` | while typing in a shape: move the caret through the letters (`⇧` selects them), so you can type or delete in the middle of the text |
+| `⌥B` `⌥I` `⌥U` | while typing in a shape: bold, italic or underline the selected letters (off again if they all have it already). With nothing selected it switches the style for the letters you type next. Only letters that are there get a style, and they keep it when text is typed or deleted around them. A line's label can't be styled |
 | `a` | line → arrow → double arrow |
 | `f` | flip a line's direction |
 | `b` | bend a line: straight → curved → square corners |

@@ -7,7 +7,8 @@
 //    {"id":2,"t":"line","a":{"to":1},"b":{"x":700,"y":200},"head":"end","pulse":"fwd","glow":"ball","c":0}
 //   ]}
 //
-// A shape may also have `"ln":"dash"|"dot"`; a line may have `"route":"curve"|"elbow"`,
+// A shape may also have `"ln":"dash"|"dot"`, and `"st"`, one digit 0-7 per letter of its
+// text (1 bold, 2 italic, 4 underline, added together); a line may have `"route":"curve"|"elbow"`,
 // `"ln"`, and a label `"text"` in font `"f"`. They're left out when they're the
 // default, so a file that doesn't use them reads and writes as it always did.
 //
@@ -130,7 +131,14 @@ function parseShape(raw: Raw, id: number, pageW: number, pageH: number): Shape {
     f: oneOf<FontKey>(raw.f, FONT_KEYS, 'o', 'f'),
     text,
     ln: oneOf<Stroke>(raw.ln, STROKES, 'solid', 'ln'),
+    st: parseStyles(raw.st, text),
   };
+}
+
+/** Letter styles are kept only if there's one digit 0–7 per character of the text; anything else is plain. */
+function parseStyles(v: unknown, text: string): string {
+  if (typeof v !== 'string' || !/^[0-7]+$/.test(v) || v.length !== [...text].length) return '';
+  return /^0+$/.test(v) ? '' : v;
 }
 
 function parseEnd(v: unknown, what: string): End {
@@ -180,7 +188,7 @@ function partJson(p: Part): string {
   }
   return (
     `{"id":${p.id},"t":"${p.t}","x":${r1(p.x)},"y":${r1(p.y)},"w":${r1(p.w)},"h":${r1(p.h)},` +
-    `"c":${p.c},"f":"${p.f}","text":${JSON.stringify(p.text)}${p.ln !== 'solid' ? `,"ln":"${p.ln}"` : ''}}`
+    `"c":${p.c},"f":"${p.f}","text":${JSON.stringify(p.text)}${p.ln !== 'solid' ? `,"ln":"${p.ln}"` : ''}${p.st !== '' ? `,"st":"${p.st}"` : ''}}`
   );
 }
 

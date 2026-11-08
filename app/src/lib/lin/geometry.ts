@@ -90,40 +90,103 @@ export function capacity(s: Shape): number {
  * is one item to a line), and an empty line between two is kept.
  */
 export function wrap(text: string, cols: number): string[] {
-  if (text === '') return [];
-  if (text.includes('\n')) return text.split('\n').flatMap((part) => (part.trim() === '' ? [''] : wrapParagraph(part, cols)));
-  return wrapParagraph(text, cols);
+  const cs = [...text];
+  return wrapIndexed(text, cols).map((row) => row.map((i) => cs[i]).join(''));
 }
 
-function wrapParagraph(text: string, cols: number): string[] {
-  if (cols <= 0) return text.trim() === '' ? [] : [text];
-  const lines: string[] = [];
-  let line: string[] = [];
-  for (const word of text.split(/ +/).filter((w) => w !== '')) {
-    let chars = [...word];
-    if (chars.length > cols) {
-      if (line.length > 0) lines.push(line.join(''));
-      while (chars.length > cols) {
-        lines.push(chars.slice(0, cols).join(''));
-        chars = chars.slice(cols);
+/** One paragraph of text (the characters from `start` up to `end`) and the rows it breaks into. */
+interface Paragraph {
+  start: number;
+  end: number;
+  rows: number[][];
+}
+
+const range = (from: number, to: number): number[] => Array.from({ length: Math.max(0, to - from) }, (_, k) => from + k);
+
+function paragraphs(cs: string[], cols: number): Paragraph[] {
+  const lists = cs.includes('\n');
+  const out: Paragraph[] = [];
+  let start = 0;
+  for (let i = 0; i <= cs.length; i++) {
+    if (i < cs.length && cs[i] !== '\n') continue;
+    const blank = cs.slice(start, i).join('').trim() === '';
+    // With breaks in the text an empty paragraph is an empty line; on its own it's nothing.
+    out.push({ start, end: i, rows: blank ? (lists ? [[]] : []) : paragraphRows(cs, start, i, cols) });
+    start = i + 1;
+  }
+  return out;
+}
+
+/** The rows `wrap` makes, as the index of each character shown (a space where words were run together is the one just before the next word). */
+export function wrapIndexed(text: string, cols: number): number[][] {
+  const cs = [...text];
+  if (cs.length === 0) return [];
+  return paragraphs(cs, cols).flatMap((p) => p.rows);
+}
+
+function paragraphRows(cs: string[], from: number, to: number, cols: number): number[][] {
+  if (cols <= 0) return [range(from, to)];
+  const rows: number[][] = [];
+  let line: number[] = [];
+  let i = from;
+  while (i < to) {
+    if (cs[i] === ' ') {
+      i++;
+      continue;
+    }
+    const s = i;
+    while (i < to && cs[i] !== ' ') i++;
+    let word = range(s, i);
+    if (word.length > cols) {
+      if (line.length > 0) rows.push(line);
+      while (word.length > cols) {
+        rows.push(word.slice(0, cols));
+        word = word.slice(cols);
       }
-      line = chars;
+      line = word;
     } else if (line.length === 0) {
-      line = chars;
-    } else if (line.length + 1 + chars.length <= cols) {
-      line = [...line, ' ', ...chars];
+      line = word;
+    } else if (line.length + 1 + word.length <= cols) {
+      line = [...line, s - 1, ...word];
     } else {
-      lines.push(line.join(''));
-      line = chars;
+      rows.push(line);
+      line = word;
     }
   }
-  if (line.length > 0) lines.push(line.join(''));
-  return lines;
+  if (line.length > 0) rows.push(line);
+  return rows;
+}
+
+/**
+ * Which row and column a caret is at, as `at` characters in. A caret on a space
+ * that was folded away (at the end of a row) is at the start of the next one.
+ */
+export function caretCell(text: string, cols: number, at: number): { row: number; col: number } {
+  const cs = [...text];
+  at = Math.min(Math.max(at, 0), cs.length);
+  let base = 0;
+  for (const p of paragraphs(cs, cols)) {
+    if (at <= p.end) {
+      for (let r = 0; r < p.rows.length; r++) {
+        const c = p.rows[r].findIndex((i) => i >= at);
+        if (c >= 0) return { row: base + r, col: c };
+      }
+      const last = p.rows.length - 1;
+      return last < 0 ? { row: base, col: 0 } : { row: base + last, col: p.rows[last].length };
+    }
+    base += p.rows.length;
+  }
+  return { row: base, col: 0 };
 }
 
 /** The lines the shape's text is drawn in. */
 export function layout(s: Shape): string[] {
   return wrap(s.text, grid(s).cols);
+}
+
+/** The same lines, as which characters of the text are in each. */
+export function layoutIndexed(s: Shape): number[][] {
+  return wrapIndexed(s.text, grid(s).cols);
 }
 
 /** Whether the shape's text fits in the shape, at its size and font. */

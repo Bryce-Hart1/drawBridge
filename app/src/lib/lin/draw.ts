@@ -6,7 +6,9 @@
 
 import {
   bounds,
-  layout,
+  caretCell,
+  grid,
+  layoutIndexed,
   LABEL_EM,
   labelWidth,
   lineEnds,
@@ -23,8 +25,12 @@ import {
   type Pt,
 } from './geometry';
 import {
+  ADVANCE,
+  BOLD,
   FONT_PX,
   GRID,
+  ITALIC,
+  UNDERLINE,
   PALETTE,
   isLine,
   newShape,
@@ -36,6 +42,7 @@ import {
   type Stroke,
 } from './model';
 import { LIGHT_LEN, pulseAt } from './pulse';
+import { span, stylesOf } from './text';
 import type { Guide } from './snap';
 
 export interface Theme {
@@ -72,6 +79,8 @@ export interface View {
   selected: readonly number[];
   /** The shape or line being typed into, which shows a caret. */
   typing?: number | null;
+  /** Where the caret is in that text, and the other end of what's selected there. Shapes only: a label's caret is always at its end. */
+  caret?: { at: number; anchor: number } | null;
   theme: Theme;
   /** Page pixels in one screen pixel (1 over the zoom), so handles stay a steady size. */
   px?: number;
@@ -135,7 +144,25 @@ function shapePath(ctx: CanvasRenderingContext2D, s: Shape) {
   }
 }
 
-function drawShape(ctx: CanvasRenderingContext2D, s: Shape, theme: Theme, typing = false) {
+/** The font for letters with this style: bold, italic, both, or neither. */
+export function fontFor(px: number, style: number): string {
+  return `${style & ITALIC ? 'italic ' : ''}${style & BOLD ? 'bold ' : ''}${px}px ${FONT}`;
+}
+
+/** Stretches of a row (by position in the row) that share one style: [from, to, style]. */
+export function runsOf(row: readonly number[], styles: readonly number[]): [number, number, number][] {
+  const runs: [number, number, number][] = [];
+  for (let k = 0; k < row.length; ) {
+    const st = styles[row[k]] ?? 0;
+    let m = k + 1;
+    while (m < row.length && (styles[row[m]] ?? 0) === st) m++;
+    runs.push([k, m, st]);
+    k = m;
+  }
+  return runs;
+}
+
+function drawShape(ctx: CanvasRenderingContext2D, s: Shape, theme: Theme, typing = false, caret: View['caret'] = null) {
   const plain = s.c === 0;
   const colour = PALETTE[s.c].fill;
   shapePath(ctx, s);
@@ -153,20 +180,56 @@ function drawShape(ctx: CanvasRenderingContext2D, s: Shape, theme: Theme, typing
 
   if (s.text === '' && !typing) return;
   const px = FONT_PX[s.f];
+  const adv = px * ADVANCE;
   const lh = lineHeight(s);
-  const lines = layout(s);
+  const rows = layoutIndexed(s);
+  const chars = [...s.text];
+  const styles = stylesOf(s);
   const { dy } = textBox(s);
-  ctx.font = `${px}px ${FONT}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  // An empty shape being typed in still has one row, for the caret.
+  const count = Math.max(rows.length, 1);
+  const top = s.y + dy - (count * lh) / 2 + lh / 2;
+  const left = (row: number) => s.x - ((rows[row]?.length ?? 0) * adv) / 2;
+
+  // What's selected, behind the letters.
+  const [from, to] = caret ? span({ ...caret, pend: null }) : [0, 0];
+  if (typing && from !== to) {
+    ctx.fillStyle = theme.accent;
+    ctx.globalAlpha = 0.3;
+    rows.forEach((row, r) => {
+      const first = row.findIndex((i) => i >= from && i < to);
+      if (first < 0) return;
+      let last = first;
+      while (last + 1 < row.length && row[last + 1] < to) last++;
+      ctx.fillRect(left(r) + first * adv, top + r * lh - lh / 2, (last - first + 1) * adv, lh);
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // The letters, a run at a time: each run is centred over the columns it covers, so a bold word lines up with its neighbours.
   ctx.fillStyle = theme.ink;
-  const top = s.y + dy - (lines.length * lh) / 2 + lh / 2;
-  lines.forEach((line, i) => ctx.fillText(line, s.x, top + i * lh));
+  ctx.strokeStyle = theme.ink;
+  rows.forEach((row, r) => {
+    const y = top + r * lh;
+    for (const [a, b, st] of runsOf(row, styles)) {
+      ctx.font = fontFor(px, st);
+      ctx.fillText(row.slice(a, b).map((i) => chars[i]).join(''), left(r) + ((a + b) / 2) * adv, y);
+      if (st & UNDERLINE) {
+        ctx.lineWidth = Math.max(1, px / 14);
+        ctx.beginPath();
+        ctx.moveTo(left(r) + a * adv, y + px * 0.5);
+        ctx.lineTo(left(r) + b * adv, y + px * 0.5);
+        ctx.stroke();
+      }
+    }
+  });
+
   if (typing) {
-    // A caret after the last character.
-    const last = lines.length > 0 ? lines[lines.length - 1] : '';
-    const x = s.x + ctx.measureText(last).width / 2 + 1;
-    ctx.fillRect(x, top + Math.max(lines.length - 1, 0) * lh - px * 0.55, 1.5, px * 1.1);
+    const cell = caretCell(s.text, grid(s).cols, caret ? caret.at : chars.length);
+    const x = left(cell.row) + cell.col * adv;
+    ctx.fillRect(x - 0.75, top + cell.row * lh - px * 0.55, 1.5, px * 1.1);
   }
 }
 
@@ -374,7 +437,7 @@ export function drawDoc(ctx: CanvasRenderingContext2D, doc: Doc, view: View) {
   if (view.grid) drawGrid(ctx, doc, view);
   for (const part of doc.items) {
     if (isLine(part)) drawLine(ctx, doc, part, view);
-    else drawShape(ctx, part, view.theme, view.typing === part.id);
+    else drawShape(ctx, part, view.theme, view.typing === part.id, view.typing === part.id ? view.caret : null);
   }
   drawSelection(ctx, doc, view);
   drawGuides(ctx, view);

@@ -23,7 +23,6 @@
     History,
     addLine,
     addShape,
-    backspace,
     copyParts,
     cycleHead,
     cyclePulse,
@@ -46,7 +45,6 @@
     setFont,
     stepSelection,
     toggleGlow,
-    typeChar,
     type Edited,
   } from '../lib/lin/edit';
   import { parseLin, serializeLin } from '../lib/lin/format';
@@ -54,6 +52,7 @@
   import { commandFor, hintsFor, type Command } from '../lib/lin/keys';
   import { COPY_OFFSET, STEP, blankDoc, find, isLine, type Doc, type End, type ShapeKind } from '../lib/lin/model';
   import { snapPoint, snapShape, toGrid, type Guide } from '../lib/lin/snap';
+  import { activeStyle, caretAt, caretAtEnd, describeStyle, insertAt, moveCaret, removeAt, toggleStyle, type Caret } from '../lib/lin/text';
   import { exportSvg } from '../lib/lin/svg';
   import { ui } from '../lib/state.svelte';
   import type { Id } from '../lib/types';
@@ -75,6 +74,8 @@
   let exporting = $state(false);
   let edit = $state(lin.edit ?? lin.id === null);
   let typing = $state(false);
+  /** Where typing is, and what's selected there. */
+  let caret = $state.raw<Caret>(caretAt(0));
   let playing = $state(!reduceMotion.matches);
   /** The selected parts; the last is the one the status row talks about. */
   let sel = $state.raw<number[]>([]);
@@ -103,9 +104,9 @@
     if (loading) return 'loading…';
     if (typing && selPart) {
       const n = [...selPart.text].length;
-      return isLine(selPart)
-        ? `typing a label · ${n}/${labelCapacity(doc, selPart)} characters fit`
-        : `typing · ${n}/${capacity(selPart)} characters fit · enter starts a new line, esc finishes`;
+      if (isLine(selPart)) return `typing a label · ${n}/${labelCapacity(doc, selPart)} characters fit`;
+      const look = describeStyle(activeStyle(selPart, caret));
+      return `typing · ${n}/${capacity(selPart)} characters fit${look ? ` · ${look}` : ''} · enter starts a new line, esc finishes`;
     }
     if (armed === 'line') return lineFrom ? 'click where the line ends' : 'click where the line starts';
     if (armed) return `click to place the ${armed}`;
@@ -180,6 +181,7 @@
       selected: edit ? sel : [],
       theme,
       typing: typing ? primary : null,
+      caret: typing ? caret : null,
       px: 1 / scale,
       guides: edit ? guides : [],
       marquee: edit ? marquee : null,
@@ -207,7 +209,7 @@
 
   // Anything on screen changing means a redraw on the next frame.
   $effect(() => {
-    void [doc, sel, armed, lineFrom, pointer, edit, typing, zoom, pan, grid, guides, marquee];
+    void [doc, sel, armed, lineFrom, pointer, edit, typing, caret, zoom, pan, grid, guides, marquee];
     redraw = true;
   });
 
@@ -344,18 +346,38 @@
         }
         typing = true;
         typingBase = doc;
+        caret = caretAtEnd(selPart);
         break;
       case 'char':
         if (primary !== null) {
-          const r = typeChar(doc, primary, c.ch);
+          const r = insertAt(doc, primary, caret, c.ch);
           if ('error' in r) say(r.error, true);
-          else doc = r.doc;
+          else {
+            doc = r.doc;
+            caret = r.caret;
+          }
         }
         break;
       case 'backspace':
         if (primary !== null) {
-          const r = backspace(doc, primary);
-          if (!('error' in r)) doc = r.doc;
+          const r = removeAt(doc, primary, caret);
+          if (!('error' in r)) {
+            doc = r.doc;
+            caret = r.caret;
+          }
+        }
+        break;
+      case 'caret':
+        if (selPart) caret = moveCaret([...selPart.text].length, caret, c.dir, c.select);
+        break;
+      case 'format':
+        if (primary !== null) {
+          const r = toggleStyle(doc, primary, caret, c.flag);
+          if ('error' in r) say(r.error, true);
+          else {
+            doc = r.doc;
+            caret = r.caret;
+          }
         }
         break;
       case 'done':

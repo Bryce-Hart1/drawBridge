@@ -95,7 +95,22 @@ export interface Shape {
   f: FontKey;
   text: string;
   ln: Stroke;
+  /**
+   * How each letter of `text` is styled: one digit 0–7 per character (see
+   * BOLD, ITALIC, UNDERLINE), or '' when none is. Never any other length.
+   */
+  st: string;
 }
+
+/** Letter styles, added together in a shape's `st`. */
+export const BOLD = 1;
+export const ITALIC = 2;
+export const UNDERLINE = 4;
+export const STYLE_NAMES: readonly [number, string][] = [
+  [BOLD, 'bold'],
+  [ITALIC, 'italic'],
+  [UNDERLINE, 'underline'],
+];
 
 export type End = { x: number; y: number } | { to: number };
 
@@ -144,7 +159,7 @@ const SIZES: Record<ShapeKind, [w: number, h: number]> = {
 /** A new shape centred at (x, y), medium font, no text. Doesn't touch the doc. */
 export function newShape(id: number, t: ShapeKind, x: number, y: number): Shape {
   const [w, h] = SIZES[t];
-  return { id, t, x, y, w, h, c: 0, f: 'o', text: '', ln: 'solid' };
+  return { id, t, x, y, w, h, c: 0, f: 'o', text: '', ln: 'solid', st: '' };
 }
 
 /** A new line from `a` to `b`: plain, straight, not pulsing. Arrowheads are added on (`a`). */

@@ -5,9 +5,10 @@
 // the drawing plus a margin, like the image exports. Pure text out, so it's
 // tested without a canvas.
 
-import { LABEL_EM, bounds, labelWidth, layout, lineHeight, linePath, midpoint, textBox, tipFrom, type Pt } from './geometry';
-import { FONT_PX, PALETTE, TINT, isLine, type Doc, type Line, type Shape, type Stroke } from './model';
-import { LIGHT } from './draw';
+import { LABEL_EM, bounds, labelWidth, layoutIndexed, lineHeight, linePath, midpoint, textBox, tipFrom, type Pt } from './geometry';
+import { ADVANCE, BOLD, FONT_PX, ITALIC, PALETTE, TINT, UNDERLINE, isLine, type Doc, type Line, type Shape, type Stroke } from './model';
+import { LIGHT, runsOf } from './draw';
+import { stylesOf } from './text';
 
 const MARGIN = 32;
 const MIN = 120;
@@ -49,11 +50,24 @@ function shapeSvg(s: Shape): string {
       break;
   }
   if (s.text === '') return body;
-  const lines = layout(s);
+  const rows = layoutIndexed(s);
+  const chars = [...s.text];
+  const styles = stylesOf(s);
   const lh = lineHeight(s);
-  const top = s.y + textBox(s).dy - (lines.length * lh) / 2 + lh / 2;
-  const text = lines
-    .map((line, i) => `<text x="${n(s.x)}" y="${n(top + i * lh)}">${xmlEscape(line)}</text>`)
+  const adv = FONT_PX[s.f] * ADVANCE;
+  const top = s.y + textBox(s).dy - (rows.length * lh) / 2 + lh / 2;
+  // A row is drawn a run at a time, each over the columns it covers, so bold and plain letters keep the editor's spacing.
+  const text = rows
+    .flatMap((row, r) => {
+      const runs = runsOf(row, styles);
+      return runs.map(([a, b, st]) => {
+        const x = runs.length === 1 ? s.x : s.x - (row.length * adv) / 2 + ((a + b) / 2) * adv;
+        const look =
+          (st & BOLD ? ' font-weight="bold"' : '') + (st & ITALIC ? ' font-style="italic"' : '') + (st & UNDERLINE ? ' text-decoration="underline"' : '');
+        const words = xmlEscape(row.slice(a, b).map((i) => chars[i]).join(''));
+        return `<text x="${n(x)}" y="${n(top + r * lh)}"${look}${runs.length > 1 ? ' xml:space="preserve"' : ''}>${words}</text>`;
+      });
+    })
     .join('');
   return `${body}<g font-family="${FONT}" font-size="${FONT_PX[s.f]}" text-anchor="middle" dominant-baseline="central" fill="${LIGHT.ink}">${text}</g>`;
 }

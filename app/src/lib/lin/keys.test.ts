@@ -1,6 +1,7 @@
 // Claude — Date 11/05/2026
 import { describe, expect, it } from 'vitest';
 import { commandFor, hintsFor, isTypable, type Command, type Context, type KeyEvent } from './keys';
+import { BOLD, ITALIC, UNDERLINE } from './model';
 
 const press = (key: string, mods: Partial<KeyEvent> = {}): KeyEvent => ({
   key,
@@ -162,6 +163,31 @@ describe('typing', () => {
     expect(cmd('Enter', TYPING)).toEqual({ do: 'done' });
   });
 
+  it('moves a caret with the arrows in a shape, and selects with shift', () => {
+    const list = { edit: true, typing: true, multiline: true };
+    expect(cmd('ArrowLeft', list)).toEqual({ do: 'caret', dir: 'left', select: false });
+    expect(cmd('ArrowRight', list)).toEqual({ do: 'caret', dir: 'right', select: false });
+    expect(cmd('ArrowLeft', list, { shiftKey: true })).toEqual({ do: 'caret', dir: 'left', select: true });
+    expect(cmd('ArrowUp', list)).toBeNull();
+    // A label has no caret to move.
+    expect(cmd('ArrowLeft', TYPING)).toBeNull();
+  });
+
+  it('styles with ⌥B, ⌥I and ⌥U, by the key and not the symbol a Mac makes of it', () => {
+    const list = { edit: true, typing: true, multiline: true };
+    expect(cmd('b', list, { altKey: true })).toEqual({ do: 'format', flag: BOLD });
+    expect(cmd('i', list, { altKey: true })).toEqual({ do: 'format', flag: ITALIC });
+    expect(cmd('U', list, { altKey: true })).toEqual({ do: 'format', flag: UNDERLINE });
+    expect(commandFor(press('∫', { altKey: true, code: 'KeyB' }), list)).toEqual({ do: 'format', flag: BOLD });
+    expect(commandFor(press('ˆ', { altKey: true, code: 'KeyI' }), list)).toEqual({ do: 'format', flag: ITALIC });
+    expect(commandFor(press('¨', { altKey: true, code: 'KeyU' }), list)).toEqual({ do: 'format', flag: UNDERLINE });
+    // Without ⌥ they are letters; other ⌥ keys do nothing; and a label has no styles.
+    expect(cmd('b', list)).toEqual({ do: 'char', ch: 'b' });
+    expect(cmd('x', list, { altKey: true })).toBeNull();
+    expect(cmd('b', TYPING, { altKey: true })).toBeNull();
+    expect(cmd('b', EDIT, { altKey: true })).toBeNull();
+  });
+
   it('ignores keys that are not text, but still saves', () => {
     expect(cmd('ArrowLeft', TYPING)).toBeNull();
     expect(cmd('Tab', TYPING)).toBeNull();
@@ -199,11 +225,19 @@ describe('hints', () => {
       expect(hints.length).toBeGreaterThan(0);
       for (const h of hints) {
         if (h.press === null) continue;
-        const got = commandFor(press(h.press, h.chord ? { metaKey: true } : {}), ctx);
+        const got = commandFor(press(h.press, { ...(h.chord ? { metaKey: true } : {}), ...(h.alt ? { altKey: true } : {}) }), ctx);
         expect(got?.do, `${h.label} ${h.word}`).toBe(h.does);
       }
     });
   }
+
+  it('shows only what typing in a shape can do', () => {
+    const words = hintsFor({ ...base, typing: true, multiline: true }).map((h) => `${h.label} ${h.word}`);
+    expect(words).toEqual(['⌥B bold', '⌥I italic', '⌥U underline', '← → move · ⇧ selects', '⏎ new line', '⌫ delete', 'esc done']);
+    // A label can't be styled or moved through, so it doesn't say so.
+    const label = hintsFor({ ...base, typing: true }).map((h) => h.label);
+    expect(label).toEqual(['⏎', 'esc', '⌫']);
+  });
 
   it('says what Enter does while typing', () => {
     const enter = (multiline: boolean) => hintsFor({ ...base, typing: true, multiline }).find((h) => h.label === '⏎')?.word;

@@ -7,7 +7,7 @@
 //
 // This turns a key press into a command; LinEditor.svelte does the command.
 
-import { FONT_KEYS, type FontKey, type ShapeKind } from './model';
+import { BOLD, FONT_KEYS, ITALIC, UNDERLINE, type FontKey, type ShapeKind } from './model';
 import type { Dir } from './edit';
 
 export type Command =
@@ -42,10 +42,14 @@ export type Command =
   // While typing:
   | { do: 'char'; ch: string }
   | { do: 'backspace' }
+  | { do: 'caret'; dir: 'left' | 'right'; select: boolean }
+  | { do: 'format'; flag: number }
   | { do: 'done' };
 
 export interface KeyEvent {
   key: string;
+  /** The physical key ('KeyB'). With ⌥ held a Mac's `key` is a symbol, not the letter. */
+  code?: string;
   shiftKey: boolean;
   metaKey: boolean;
   ctrlKey: boolean;
@@ -57,11 +61,16 @@ export interface Mode {
   edit: boolean;
   /** Typing into a shape. */
   typing: boolean;
-  /** Typing into a shape, where Enter starts a new line (a label on a line is one row, so Enter ends it). */
+  /**
+   * Typing into a shape, where Enter starts a new line (a label on a line is one
+   * row, so Enter ends it), the arrows move a caret, and ⌥B, ⌥I and ⌥U style letters.
+   */
   multiline?: boolean;
 }
 
 const ARM: Record<string, ShapeKind | 'line'> = { c: 'circle', t: 'triangle', r: 'rect', d: 'diamond', l: 'line' };
+/** ⌥ with these letters, while typing in a shape. */
+const FORMATS: Record<string, number> = { b: BOLD, i: ITALIC, u: UNDERLINE };
 const ARROWS: Record<string, Dir> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
 
 /** One typed character: a single, printable one. */
@@ -69,9 +78,20 @@ export function isTypable(key: string): boolean {
   return [...key].length === 1 && key >= ' ' && key !== '\u007f';
 }
 
+/** The letter a key is, even with ⌥ held. */
+function letterOf(e: KeyEvent): string {
+  if (e.code?.startsWith('Key')) return e.code.slice(3).toLowerCase();
+  return e.key.length === 1 ? e.key.toLowerCase() : '';
+}
+
 export function commandFor(e: KeyEvent, mode: Mode): Command | null {
   const chord = e.metaKey || e.ctrlKey;
   if (e.altKey) {
+    // Typing is all letters, so ⌥ is what tells a style from a letter.
+    if (!chord && mode.typing && mode.multiline) {
+      const flag = FORMATS[letterOf(e)];
+      return flag ? { do: 'format', flag } : null;
+    }
     // ⌥ with an arrow moves the selection: 10 px, or 1 with ⇧. Nothing else uses ⌥.
     if (!chord && mode.edit && !mode.typing && e.key in ARROWS) return { do: 'nudge', dir: ARROWS[e.key], fine: e.shiftKey };
     return null;
@@ -94,6 +114,9 @@ export function commandFor(e: KeyEvent, mode: Mode): Command | null {
     if (e.key === 'Enter') return mode.multiline ? { do: 'char', ch: '\n' } : { do: 'done' };
     if (e.key === 'Escape') return { do: 'done' };
     if (e.key === 'Backspace') return { do: 'backspace' };
+    if (mode.multiline && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      return { do: 'caret', dir: e.key === 'ArrowLeft' ? 'left' : 'right', select: e.shiftKey };
+    }
     return isTypable(e.key) ? { do: 'char', ch: e.key } : null;
   }
 
@@ -142,6 +165,8 @@ export interface Hint {
   press: string | null;
   /** ⌘ with it. */
   chord?: boolean;
+  /** ⌥ with it. */
+  alt?: boolean;
   does: Command['do'] | null;
 }
 
@@ -153,18 +178,27 @@ export interface Context extends Mode {
   playing: boolean;
 }
 
-const h = (label: string, word: string, press: string | null, does: Command['do'] | null, chord = false): Hint => ({
+const h = (label: string, word: string, press: string | null, does: Command['do'] | null, chord = false, alt = false): Hint => ({
   label,
   word,
   press,
   does,
   ...(chord ? { chord } : {}),
+  ...(alt ? { alt } : {}),
 });
 
 /** The keys worth showing right now: what the selection can do, and the always-there ones. */
 export function hintsFor(c: Context): Hint[] {
   if (c.typing && c.multiline) {
-    return [h('⏎', 'new line', 'Enter', 'char'), h('esc', 'done', 'Escape', 'done'), h('⌫', 'delete', 'Backspace', 'backspace')];
+    return [
+      h('⌥B', 'bold', 'b', 'format', false, true),
+      h('⌥I', 'italic', 'i', 'format', false, true),
+      h('⌥U', 'underline', 'u', 'format', false, true),
+      h('← →', 'move · ⇧ selects', 'ArrowLeft', 'caret'),
+      h('⏎', 'new line', 'Enter', 'char'),
+      h('⌫', 'delete', 'Backspace', 'backspace'),
+      h('esc', 'done', 'Escape', 'done'),
+    ];
   }
   if (c.typing) return [h('⏎', 'done', 'Enter', 'done'), h('esc', 'done', 'Escape', 'done'), h('⌫', 'delete', 'Backspace', 'backspace')];
   const play = h('space', c.playing ? 'pause' : 'play', ' ', 'play');

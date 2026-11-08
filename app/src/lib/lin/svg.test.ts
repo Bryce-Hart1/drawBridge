@@ -1,7 +1,8 @@
 // Claude — Date 11/06/2026
 import { describe, expect, it } from 'vitest';
 import { addLine, addShape, cycleHead, cycleRoute, cycleStroke, recolor, typeChar, type Edited } from './edit';
-import { blankDoc, type Doc } from './model';
+import { BOLD, ITALIC, UNDERLINE, blankDoc, type Doc } from './model';
+import { toggleStyle } from './text';
 import { exportSvg, xmlEscape } from './svg';
 
 function ok(e: Edited): Doc {
@@ -66,5 +67,21 @@ describe('SVG export', () => {
 
   it('refuses an empty page', () => {
     expect(() => exportSvg(blankDoc())).toThrow('nothing to export');
+  });
+
+  it('writes bold, italic and underlined letters as runs that keep the editor spacing', () => {
+    let doc = addShape(blankDoc(), 'rect', { x: 300, y: 200 }).doc;
+    for (const ch of 'ab cd') doc = ok(typeChar(doc, 1, ch));
+    const styled = toggleStyle(doc, 1, { at: 5, anchor: 3, pend: null }, BOLD | ITALIC | UNDERLINE);
+    if ('error' in styled) throw new Error(styled.error);
+    const svg = exportSvg(styled.doc);
+    expect(svg).toContain('>ab </text>');
+    expect(svg).toContain('font-weight="bold" font-style="italic" text-decoration="underline"');
+    expect(svg).toContain('>cd</text>');
+    // The break between runs keeps its space.
+    expect(svg).toContain('xml:space="preserve"');
+    // Plain text is still one element, with no styling attributes.
+    expect(exportSvg(sample())).not.toContain('font-weight');
+    expect(exportSvg(sample())).not.toContain('xml:space');
   });
 });

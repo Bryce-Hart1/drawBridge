@@ -5,7 +5,8 @@
 // key pressed with a line selected) says why instead of doing nothing, and
 // the editor shows that in its bottom line.
 
-import { capacity, fits, labelCapacity, labelFits, lineEnds, snapTarget, type Pt } from './geometry';
+import { capacity, fits, labelFits, lineEnds, snapTarget, type Pt } from './geometry';
+import { caretAtEnd, insertAt, removeAt } from './text';
 import {
   BIG_STEP,
   COPY_OFFSET,
@@ -179,29 +180,19 @@ export function setFont(doc: Doc, id: number, f: FontKey): Edited {
   return { doc: replace(doc, next) };
 }
 
-/** Add one character to the text of a shape (or the label of a line), if it still fits. A newline starts a new line in a shape. */
+/** Add one character at the end of the text of a shape (or the label of a line), if it still fits. A newline starts a new line in a shape. */
 export function typeChar(doc: Doc, id: number, ch: string): Edited {
   const p = find(doc, id);
   if (!p) return { error: 'select a shape or line to type in it' };
-  if (isLine(p)) {
-    // A label is one row.
-    if (ch === '\n') return { error: 'a label is one row' };
-    const next: Line = { ...p, text: p.text + ch };
-    if (!labelFits(doc, next)) return { error: `no room: a label holds up to ${labelCapacity(doc, p)} here at this size (i is smaller)` };
-    return { doc: replace(doc, next) };
-  }
-  // Typing \n (a backslash, then n) is another way to start a new line: the two characters become one break.
-  const text = ch === 'n' && p.text.endsWith('\\') ? `${p.text.slice(0, -1)}\n` : p.text + ch;
-  const next: Shape = { ...p, text };
-  if (!fits(next)) return { error: `no room: it holds up to ${capacity(p)} at this size; a bigger shape or a smaller font (i) holds more` };
-  return { doc: replace(doc, next) };
+  const r = insertAt(doc, id, { ...caretAtEnd(p), pend: 0 }, ch);
+  return 'error' in r ? r : { doc: r.doc };
 }
 
 export function backspace(doc: Doc, id: number): Edited {
   const p = find(doc, id);
   if (!p) return { error: 'select a shape or line to type in it' };
-  if (p.text === '') return { doc };
-  return { doc: replace(doc, { ...p, text: [...p.text].slice(0, -1).join('') }) };
+  const r = removeAt(doc, id, caretAtEnd(p));
+  return 'error' in r ? r : { doc: r.doc };
 }
 
 // ── Lines ───────────────────────────────────────────────────────────────

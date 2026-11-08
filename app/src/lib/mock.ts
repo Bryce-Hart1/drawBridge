@@ -23,11 +23,11 @@ const SAMPLE_DIAGRAM: Doc = {
   h: 800,
   next: 16,
   items: [
-    { id: 1, t: 'rect', x: 200, y: 200, w: 180, h: 80, c: 6, f: 'o', text: 'client', ln: 'solid' },
-    { id: 2, t: 'diamond', x: 540, y: 200, w: 160, h: 110, c: 3, f: 'o', text: 'auth?', ln: 'solid' },
-    { id: 3, t: 'circle', x: 880, y: 200, w: 110, h: 110, c: 4, f: 'o', text: 'db', ln: 'solid' },
-    { id: 4, t: 'triangle', x: 540, y: 470, w: 140, h: 120, c: 1, f: 'i', text: 'err', ln: 'solid' },
-    { id: 5, t: 'rect', x: 200, y: 470, w: 180, h: 80, c: 8, f: 'o', text: 'cache', ln: 'dash' },
+    { id: 1, t: 'rect', x: 200, y: 200, w: 180, h: 80, c: 6, f: 'o', text: 'client', ln: 'solid', st: '' },
+    { id: 2, t: 'diamond', x: 540, y: 200, w: 160, h: 110, c: 3, f: 'o', text: 'auth?', ln: 'solid', st: '' },
+    { id: 3, t: 'circle', x: 880, y: 200, w: 110, h: 110, c: 4, f: 'o', text: 'db', ln: 'solid', st: '' },
+    { id: 4, t: 'triangle', x: 540, y: 470, w: 140, h: 120, c: 1, f: 'i', text: 'err', ln: 'solid', st: '' },
+    { id: 5, t: 'rect', x: 200, y: 470, w: 180, h: 80, c: 8, f: 'o', text: 'cache', ln: 'dash', st: '' },
     // client → auth and auth → client run side by side rather than on top of each other.
     { id: 6, t: 'line', a: { to: 1 }, b: { to: 2 }, head: 'end', pulse: 'fwd', glow: 'ball', c: 0, route: 'straight', ln: 'solid', text: 'login', f: 'i' },
     { id: 7, t: 'line', a: { to: 2 }, b: { to: 3 }, head: 'end', pulse: 'fwd', glow: 'light', c: 4, route: 'straight', ln: 'solid', text: '', f: 'o' },
