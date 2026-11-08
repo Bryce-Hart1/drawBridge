@@ -7,6 +7,7 @@
 import {
   bounds,
   layout,
+  LABEL_EM,
   labelWidth,
   lineEnds,
   linePath,
@@ -91,9 +92,14 @@ const TUBE_W = 5;
 const HEAD = 14;
 const BALL = 6;
 
-/** The dash pattern for an outline; dots are zero-length dashes with round caps. */
-function dashes(ln: Stroke): number[] {
-  return ln === 'dash' ? [10, 6] : ln === 'dot' ? [0.1, 6] : [];
+/**
+ * The dash pattern for an outline `w` px thick; dots are zero-length dashes
+ * with round caps, so they come out `w` across. The gaps grow with the
+ * thickness so a thick dotted line is still dots and not a solid one.
+ */
+function dashes(ln: Stroke, w = 2): number[] {
+  const gap = Math.max(6, w * 2.4);
+  return ln === 'dash' ? [Math.max(10, w * 4), gap] : ln === 'dot' ? [0.1, gap] : [];
 }
 
 function strokePath(ctx: CanvasRenderingContext2D, pts: readonly Pt[]) {
@@ -182,7 +188,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, l: Line, path: readonly Pt[], 
   const w = Math.max(labelWidth(l), typing ? px * 0.6 : 0);
   // The label sits on a patch of page so the line doesn't run through the words.
   ctx.fillStyle = theme.paper;
-  ctx.fillRect(at.x - w / 2 - 4, at.y - px * 0.75, w + 8, px * 1.5);
+  ctx.fillRect(at.x - w / 2 - 4, at.y - (px * LABEL_EM) / 2, w + 8, px * LABEL_EM);
   ctx.font = `${px}px ${FONT}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -214,11 +220,11 @@ function drawLine(ctx: CanvasRenderingContext2D, doc: Doc, l: Line, view: View) 
     ctx.globalAlpha = 1;
   }
 
-  ctx.lineCap = l.ln === 'dot' && !tube ? 'round' : 'round';
+  ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.lineWidth = tube ? TUBE_W : LINE_W;
   ctx.strokeStyle = color;
-  ctx.setLineDash(tube ? [] : dashes(l.ln));
+  ctx.setLineDash(dashes(l.ln, ctx.lineWidth));
   strokePath(ctx, path);
   ctx.setLineDash([]);
 

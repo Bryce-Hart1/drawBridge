@@ -101,7 +101,8 @@ export function commandFor(e: KeyEvent, mode: Mode): Command | null {
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
   if (k === 'Escape') return { do: 'escape' };
-  if (k === ' ') return { do: 'play' };
+  // Play and pause are for watching; while editing, the space bar does nothing.
+  if (k === ' ') return mode.edit ? null : { do: 'play' };
   if (k === 'x') return { do: 'export' };
   if (k === 'e') return { do: 'edit' };
   // Looking around works while viewing too.
@@ -173,7 +174,6 @@ export function hintsFor(c: Context): Hint[] {
   if (c.armed) return [h('click', 'to place', null, null), h('esc', 'cancel', 'Escape', 'escape')];
 
   const tail = [
-    play,
     h('⌘S', 'save', 's', 'save', true),
     h('x', 'export', 'x', 'export'),
     zoom,
@@ -187,7 +187,7 @@ export function hintsFor(c: Context): Hint[] {
     h('⌘D', 'duplicate', 'd', 'duplicate', true),
     h('⌘C ⌘V', 'copy', 'c', 'copy', true),
     h('[ ]', 'order', ']', 'order'),
-    h('w', 'outline', 'w', 'style'),
+    h('w', 'dash/dot', 'w', 'style'),
     h('⌫', 'delete', 'Backspace', 'delete'),
   ];
   // The ⌥ hint is a description, not a key a test can press: it has no `press`.

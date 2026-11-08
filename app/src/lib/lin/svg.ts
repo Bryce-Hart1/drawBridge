@@ -5,7 +5,7 @@
 // the drawing plus a margin, like the image exports. Pure text out, so it's
 // tested without a canvas.
 
-import { bounds, labelWidth, layout, lineHeight, linePath, midpoint, textBox, tipFrom, type Pt } from './geometry';
+import { LABEL_EM, bounds, labelWidth, layout, lineHeight, linePath, midpoint, textBox, tipFrom, type Pt } from './geometry';
 import { FONT_PX, PALETTE, TINT, isLine, type Doc, type Line, type Shape, type Stroke } from './model';
 import { LIGHT } from './draw';
 
@@ -77,7 +77,7 @@ function lineSvg(doc: Doc, l: Line): string {
     const at = midpoint(path);
     const w = labelWidth(l);
     out +=
-      `<rect x="${n(at.x - w / 2 - 4)}" y="${n(at.y - px * 0.75)}" width="${n(w + 8)}" height="${n(px * 1.5)}" fill="${LIGHT.paper}"/>` +
+      `<rect x="${n(at.x - w / 2 - 4)}" y="${n(at.y - (px * LABEL_EM) / 2)}" width="${n(w + 8)}" height="${n(px * LABEL_EM)}" fill="${LIGHT.paper}"/>` +
       `<text x="${n(at.x)}" y="${n(at.y)}" font-family="${FONT}" font-size="${px}" text-anchor="middle" dominant-baseline="central" fill="${LIGHT.ink}">${xmlEscape(l.text)}</text>`;
   }
   return out;

@@ -248,8 +248,11 @@ const unit = (v: Pt): Pt => {
   return n === 0 ? { x: 0, y: 0 } : { x: v.x / n, y: v.y / n };
 };
 
-/** How far apart lines joining the same two shapes are drawn, at most. */
-export const FAN = 18;
+/** How far apart lines joining the same two shapes are drawn, at least when there's room. */
+export const FAN = 24;
+
+/** The patch of page a label sits on is this many ems tall (draw.ts uses the same). */
+export const LABEL_EM = 1.5;
 
 /** The two shapes a line joins, lowest id first, if both its ends are on shapes. */
 function pairOf(l: Line): [number, number] | null {
@@ -273,9 +276,12 @@ function fanOffset(doc: Doc, l: Line): number {
   const lo = shapeOf(doc, key[0]);
   const hi = shapeOf(doc, key[1]);
   if (!lo || !hi) return 0;
+  // Far enough apart that the tallest label among them has a row to itself, so each can be read.
+  const label = Math.max(...mates.map((m) => (m.text === '' ? 0 : FONT_PX[m.f] * LABEL_EM)));
+  const want = Math.max(FAN, label + 6);
   // Never fan wider than the smaller shape, or the ends would miss it.
-  const room = 0.7 * Math.min(lo.w, lo.h, hi.w, hi.h);
-  const step = Math.min(FAN, room / (mates.length - 1));
+  const room = 0.85 * Math.min(lo.w, lo.h, hi.w, hi.h);
+  const step = Math.min(want, room / (mates.length - 1));
   return (mates.findIndex((m) => m.id === l.id) - (mates.length - 1) / 2) * step;
 }
 

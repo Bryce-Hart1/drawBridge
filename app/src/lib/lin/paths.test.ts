@@ -80,7 +80,19 @@ describe('lines between the same two shapes', () => {
     doc = { ...doc, items: doc.items.map((p) => (p.id === 1 ? { ...p, h: 24 } : p)) };
     doc = joined(joined(doc, 1, 2), 2, 1);
     const gap = Math.abs(lineEnds(doc, line(doc, 3)).a.y - lineEnds(doc, line(doc, 4)).b.y);
-    expect(gap).toBeCloseTo(0.7 * 24);
+    expect(gap).toBeCloseTo(0.85 * 24);
+  });
+
+  it('spreads them further apart when they carry labels, so each can be read', () => {
+    let doc = joined(joined(two(), 1, 2), 2, 1);
+    const gap = () => Math.abs(lineEnds(doc, line(doc, 3)).a.y - lineEnds(doc, line(doc, 4)).b.y);
+    expect(gap()).toBeCloseTo(FAN);
+    // A medium label is 27 px tall: the lines go at least that far apart, plus a little air.
+    doc = { ...doc, items: doc.items.map((p) => (p.id === 3 ? { ...p, text: 'login' } : p)) };
+    expect(gap()).toBeCloseTo(27 + 6);
+    // A small one needs less.
+    doc = { ...doc, items: doc.items.map((p) => (p.id === 3 ? { ...p, f: 'i' as const } : p)) };
+    expect(gap()).toBeCloseTo(FAN);
   });
 
   it('leaves lines to different shapes, and free-ended lines, alone', () => {

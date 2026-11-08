@@ -152,7 +152,7 @@ end on a shape and it stays attached when the shape moves.
 A new line is plain; arrowheads are something you add to it (`a`: none, then
 one arrow, then two). Lines that join the same two shapes, such as one from A
 to B and one from B to A, are drawn side by side rather than on top of each
-other. A line can be straight, curved or square-cornered (`b`), solid, dashed
+other, far enough apart that a label on each can be read. A line can be straight, curved or square-cornered (`b`), solid, dashed
 or dotted (`w`), and carry a short label (select it, then Enter).
 
 | Keys | Does |
@@ -171,7 +171,7 @@ or dotted (`w`), and carry a short label (select it, then Enter).
 | `a` | line → arrow → double arrow |
 | `f` | flip a line's direction |
 | `b` | bend a line: straight → curved → square corners |
-| `w` | outline: solid → dashed → dotted (shapes and lines) |
+| `w` | outline: solid → dashed → dotted (shapes and lines; a dotted line stays dotted while it pulses) |
 | `m` | pulse: off → start to end → end to start → out from the middle |
 | `s` | pulse as a ball, or as a light inside the line |
 | `[` `]` | send back, bring forward one step (`⇧` for all the way) |
@@ -183,7 +183,7 @@ or dotted (`w`), and carry a short label (select it, then Enter).
 | `⌘Z` `⇧⌘Z` | undo, redo |
 | `⌘S` | save, as a new version of the file, like a note |
 | `x` | export. The file name you choose sets the format: `.jpg`, `.png` or `.svg` (cropped to the drawing, on white; images at twice the size) |
-| `space` | pause or play the animation |
+| `space` | pause or play the animation (while viewing; the space bar does nothing while editing) |
 | `esc` | cancel the tool, deselect, close |
 
 A `.lin` is JSON text with one part per line, so it syncs like any note. The

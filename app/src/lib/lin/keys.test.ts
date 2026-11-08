@@ -80,7 +80,7 @@ describe('editing keys', () => {
 
   it('has no two keys for different things', () => {
     // Every plain key in the edit map, run through the map: each gives one command.
-    const keys = ['c', 't', 'r', 'd', 'l', 'i', 'o', 'p', 'a', 'f', 'm', 's', 'x', 'e', ' ', 'Tab', 'Enter', 'Backspace', 'Delete', 'Escape'];
+    const keys = ['c', 't', 'r', 'd', 'l', 'i', 'o', 'p', 'a', 'f', 'm', 's', 'x', 'e', 'Tab', 'Enter', 'Backspace', 'Delete', 'Escape'];
     const seen = new Map<string, string>();
     for (const k of keys) {
       const c = cmd(k) as Command;
@@ -211,9 +211,17 @@ describe('hints', () => {
     expect(enter(false)).toBe('done');
   });
 
-  it('says pause while playing and play while paused', () => {
-    expect(hintsFor(base).find((h) => h.label === 'space')?.word).toBe('pause');
-    expect(hintsFor({ ...base, playing: false }).find((h) => h.label === 'space')?.word).toBe('play');
+  it('says pause while playing and play while paused, when viewing', () => {
+    const view = { ...base, edit: false };
+    expect(hintsFor(view).find((h) => h.label === 'space')?.word).toBe('pause');
+    expect(hintsFor({ ...view, playing: false }).find((h) => h.label === 'space')?.word).toBe('play');
+  });
+
+  it('has no play or pause while editing', () => {
+    for (const selected of [null, 'shape', 'line', 'many'] as const) {
+      expect(hintsFor({ ...base, selected }).some((h) => h.label === 'space')).toBe(false);
+    }
+    expect(cmd(' ', EDIT)).toBeNull();
   });
 
   it('offers only what the selection can do', () => {
