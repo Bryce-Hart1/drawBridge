@@ -344,16 +344,26 @@ export function mockBackend(): Backend {
       emit('index-changed');
       return ids.length;
     },
-    async upload(paths, parent, onClash) {
+    async upload(paths, parent, onClash, trashOriginals) {
       const names = paths.map((p) => p.split('/').pop() ?? p);
       const taken = names.filter((name) => children(parent).some((n) => n.name === name));
       if (taken.length && onClash === 'ask') return { queued: 0, skipped: 0, clashes: taken };
       let queued = 0;
       let skipped = 0;
+      // The real one trashes once the whole batch is up, and only if something
+      // was queued; so does this, and keeps what was skipped.
+      const keptBack: { name: string; why: string }[] = [];
+      const sent: string[] = [];
+      let left = 0;
+      const settle = () => {
+        if (trashOriginals && --left === 0) emit('originals', { trashed: sent, kept: keptBack });
+      };
       for (let name of names) {
+        const original = name;
         const existing = children(parent).find((n) => n.name === name);
         if (existing && onClash === 'skip') {
           skipped++;
+          keptBack.push({ name: original, why: `${original} wasn't uploaded` });
           continue;
         }
         if (existing && onClash === 'keep') {
@@ -367,8 +377,11 @@ export function mockBackend(): Backend {
           if (existing && onClash === 'replace') existing.size = size;
           else add(parent, target, size);
           emit('index-changed');
+          sent.push(original);
+          settle();
         });
         queued++;
+        left++;
       }
       return { queued, skipped, clashes: [] };
     },
@@ -476,6 +489,7 @@ export function mockBackend(): Backend {
     onIndexChanged: (cb) => on('index-changed', cb),
     onSyncStatus: (cb) => on('sync-status', cb),
     onTransfer: (cb) => on('transfer', cb),
+    onOriginals: (cb) => on('originals', cb),
     onDragDrop(cb: (e: DropEvent) => void) {
       // The browser gives names, not paths; good enough for a fake upload.
       let depth = 0;

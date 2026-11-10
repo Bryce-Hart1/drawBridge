@@ -2,7 +2,7 @@
 // Text for the screen: sizes, times, types and progress bars, all measured in
 // character cells.
 
-import type { Item } from './types';
+import type { Item, OriginalsOutcome } from './types';
 
 const UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
 
@@ -138,6 +138,14 @@ export function wantsPoster(item: Item): boolean {
   const mime = baseMime(item.mime);
   // A diagram's thumbnail is the diagram, drawn by the page from the file itself.
   return item.kind === 'file' && item.blob !== null && (mime.startsWith('video/') || POSTERED.includes(mime) || isLin(item));
+}
+
+/** The bottom line's account of what happened to uploaded originals. */
+export function originalsText(o: OriginalsOutcome): string {
+  const said: string[] = [];
+  if (o.trashed.length > 0) said.push(`moved ${plural(o.trashed.length, 'original')} to the Trash`);
+  for (const k of o.kept) said.push(`kept ${k.name}: ${k.why}`);
+  return said.join(' · ') || 'nothing to trash';
 }
 
 export function errorText(e: unknown): string {

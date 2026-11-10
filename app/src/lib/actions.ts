@@ -3,9 +3,9 @@
 // what changed; anything that fails is reported in the bottom line.
 
 import { api } from './api';
-import { errorText, isLin, isLinName, isText, plural, preview, splitName } from './format';
+import { errorText, isLin, isLinName, isText, originalsText, plural, preview, splitName } from './format';
 import { current, ui } from './state.svelte';
-import type { Clash, Id, Item } from './types';
+import type { Clash, Id, Item, OriginalsOutcome } from './types';
 
 let messageTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -155,38 +155,67 @@ export function askDiagram() {
   };
 }
 
-/** Upload files or folders into the current folder, asking once about names already taken. */
-export async function uploadPaths(paths: string[], onClash: Clash = 'ask') {
+/**
+ * Upload files or folders into the current folder, asking once about names
+ * already taken. With `trashOriginals` they go to the Trash after, but only
+ * once everything in each is on the store.
+ */
+export async function uploadPaths(paths: string[], onClash: Clash = 'ask', trashOriginals = false) {
   if (paths.length === 0) return;
   try {
-    const plan = await api.upload(paths, ui.listing.dir, onClash);
+    const plan = await api.upload(paths, ui.listing.dir, onClash, trashOriginals);
     if (plan.clashes.length > 0) {
       const one = plan.clashes.length === 1;
       ui.prompt = {
         kind: 'choice',
         text: `${one ? plan.clashes[0] : plural(plan.clashes.length, 'name')} already ${one ? 'exists' : 'exist'}:`,
         choices: [
-          { key: 'r', label: 'replace', pick: () => uploadPaths(paths, 'replace') },
-          { key: 'k', label: 'keep both', pick: () => uploadPaths(paths, 'keep') },
-          { key: 's', label: 'skip', pick: () => uploadPaths(paths, 'skip') },
+          { key: 'r', label: 'replace', pick: () => uploadPaths(paths, 'replace', trashOriginals) },
+          { key: 'k', label: 'keep both', pick: () => uploadPaths(paths, 'keep', trashOriginals) },
+          { key: 's', label: 'skip', pick: () => uploadPaths(paths, 'skip', trashOriginals) },
         ],
       };
       return;
     }
     const skipped = plan.skipped ? `, ${plan.skipped} skipped` : '';
-    say(plan.queued ? `uploading ${plural(plan.queued, 'file')}${skipped}` : `nothing to upload${skipped}`);
+    const then = trashOriginals ? ' · originals go to the Trash once uploaded' : '';
+    say(plan.queued ? `uploading ${plural(plan.queued, 'file')}${skipped}${then}` : `nothing to upload${skipped}`);
   } catch (e) {
     fail(e);
   }
 }
 
+/**
+ * What was dropped or picked: ask what to do with the originals on this
+ * device, then upload. Escape drops the whole thing. Keeping them is first
+ * and nothing is the default: trashing is always a key pressed on purpose.
+ */
+export function askUpload(paths: string[]) {
+  if (paths.length === 0) return;
+  const last = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+  const what = paths.length === 1 ? last(paths[0]) : plural(paths.length, 'item');
+  ui.prompt = {
+    kind: 'choice',
+    text: `upload ${what}?`,
+    choices: [
+      { key: 'k', label: 'keep originals', pick: () => uploadPaths(paths) },
+      { key: 't', label: 'trash originals once uploaded', pick: () => uploadPaths(paths, 'ask', true) },
+    ],
+  };
+}
+
 export async function pickAndUpload() {
   try {
     const paths = await api.pickFiles();
-    if (paths) await uploadPaths(paths);
+    if (paths) askUpload(paths);
   } catch (e) {
     fail(e);
   }
+}
+
+/** The originals of an upload were trashed, or some were kept: say which, and why. */
+export function reportOriginals(o: OriginalsOutcome) {
+  say(originalsText(o), o.kept.length > 0);
 }
 
 export async function saveAs(item: Pick<Item, 'id' | 'name'>) {

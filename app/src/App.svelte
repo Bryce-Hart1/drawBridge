@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import Browser from './components/Browser.svelte';
   import Setup from './components/Setup.svelte';
-  import { fail, load, reload, uploadPaths } from './lib/actions';
+  import { askUpload, fail, load, reload, reportOriginals } from './lib/actions';
   import { api, type Unlisten } from './lib/api';
   import { ui } from './lib/state.svelte';
 
@@ -25,6 +25,7 @@
           api.onTransfer((t) => {
             ui.transfers[t.id] = t;
           }),
+          api.onOriginals(reportOriginals),
           api.onDragDrop((e) => {
             if (!ui.status?.connected) return;
             if (e.type === 'enter' || e.type === 'over') {
@@ -33,7 +34,7 @@
               ui.dropping = false;
             } else {
               ui.dropping = false;
-              uploadPaths(e.paths);
+              askUpload(e.paths);
             }
           }),
         ]);

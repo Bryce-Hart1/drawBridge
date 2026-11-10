@@ -1,16 +1,18 @@
 // Claude — Date 11/03/2026
 // The drawBridge desktop app: one window on the system webview, and
 // drawbridge-core underneath. The UI (app/src) calls the commands in
-// commands.rs and listens for three events:
+// commands.rs and listens for four events:
 //   index-changed  the tree changed (here, or pulled from another device)
 //   sync-status    syncing, synced, offline or failed
 //   transfer       an upload or download moved along
+//   originals      uploaded originals went to the Trash, or were kept (originals.rs)
 // Thumbnails load over the `thumb://` protocol (thumbs.rs). Photos, audio,
 // video and PDFs load from core's stream server, on loopback, started when
 // something is first opened and stopped when nothing has been for a while.
 
 mod commands;
 mod config;
+mod originals;
 mod state;
 mod sync_loop;
 mod thumbs;

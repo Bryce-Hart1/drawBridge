@@ -30,6 +30,11 @@ keyring = { version = "4.2.0", features = [] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tokio = { version = "1.52.3", features = ["sync", "time", "macros"] }
+# 11/09/2026: moves a file or folder to the Trash (macOS: NSFileManager's
+# trashItemAtURL), for "delete the originals" after an upload. Nothing here
+# ever deletes for good. Its default features are for listing and restoring
+# the Trash on other systems; this only sends things there.
+trash = { version = "5.3.0", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

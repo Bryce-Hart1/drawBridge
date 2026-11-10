@@ -75,6 +75,14 @@ export interface UploadPlan {
   clashes: string[];
 }
 
+/** What became of the originals of an upload started with "trash originals". Mirrors originals.rs. */
+export interface OriginalsOutcome {
+  /** Names now in the Trash; folders end in `/`. */
+  trashed: string[];
+  /** Left where they were, each with what stopped it. */
+  kept: { name: string; why: string }[];
+}
+
 /** `waiting`: the store couldn't be reached; it goes again once it can. */
 export type TransferState = 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'stopped';
 

@@ -246,10 +246,16 @@ pub async fn remove(app: State<'_>, id: String) -> Result<usize> {
 }
 
 #[tauri::command]
-pub async fn upload(app: State<'_>, paths: Vec<PathBuf>, parent: Option<String>, on_clash: OnClash) -> Result<UploadPlan> {
+pub async fn upload(
+    app: State<'_>,
+    paths: Vec<PathBuf>,
+    parent: Option<String>,
+    on_clash: OnClash,
+    trash_originals: bool,
+) -> Result<UploadPlan> {
     let app = app.inner().clone();
     // Walking a dropped folder reads the disk: keep it off the async threads.
-    tauri::async_runtime::spawn_blocking(move || transfers::upload(&app, paths, parent, on_clash))
+    tauri::async_runtime::spawn_blocking(move || transfers::upload(&app, paths, parent, on_clash, trash_originals))
         .await
         .map_err(|e| CmdError::new("other", e.to_string()))?
 }

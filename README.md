@@ -15,7 +15,9 @@ in development.
   collection of replaced content
 - the `dbx` CLI
 - the desktop app (Tauri): a monochrome, terminal-style window for browsing,
-  uploading (picker or drag-and-drop, folders included), downloading, moving,
+  uploading (picker or drag-and-drop, folders included; each upload asks
+  whether to keep the originals or move them to the Trash once everything in
+  them is on the store), downloading, moving,
   renaming, deleting, notes, `.lin` diagrams (keyboard-drawn, animated, exported
   as JPEG, PNG or SVG), search across every folder, and photo thumbnails
 - streaming and previews: photos full size, audio and video that play and seek

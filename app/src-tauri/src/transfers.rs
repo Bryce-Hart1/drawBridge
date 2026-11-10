@@ -27,9 +27,11 @@ use drawbridge_core::blob::{self, UploadOptions};
 use drawbridge_core::oplog::check_name;
 use drawbridge_core::{Dest, Entry, Error, Progress, View, index};
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use tokio::sync::Notify;
 
 use crate::commands::CmdError;
+use crate::originals::{self, Originals, Stamp};
 use crate::state::{App, lock};
 
 /// Finished transfers kept for the UI to show.
@@ -71,7 +73,9 @@ pub struct Transfer {
 }
 
 pub enum Job {
-    Upload { path: PathBuf, dest: Dest },
+    /// `originals`: the batch this upload is part of, if its originals are to
+    /// go to the Trash once all of it is up (originals.rs).
+    Upload { path: PathBuf, dest: Dest, originals: Option<Arc<Originals>> },
     /// An upload a quit interrupted, by its blob id: it goes where it was going.
     Resume { blob: String },
     Download { blob: String, out: PathBuf },
@@ -120,20 +124,20 @@ impl Transfers {
     /// Stop a transfer and throw away what it did: a queued one never starts,
     /// a running one stops once its chunks in flight land.
     pub fn cancel(&self, app: &App, id: u64) {
-        let was_queued = {
+        let queued = {
             let mut g = lock(&self.inner);
             if let Some(at) = g.queue.iter().position(|(i, _)| *i == id) {
-                g.queue.remove(at);
-                true
+                g.queue.remove(at)
             } else {
                 if let Some(stop) = g.stops.get(&id) {
                     stop.store(true, Ordering::Relaxed);
                     g.cancelled.insert(id);
                 }
-                false
+                None
             }
         };
-        if was_queued {
+        if let Some((_, job)) = queued {
+            ended(&job, false);
             self.finish(app, id, TransferState::Stopped, None);
         }
     }
@@ -141,14 +145,15 @@ impl Transfers {
     /// Stop everything, keeping what uploads have sent, for disconnecting. The
     /// uploads resume when the device connects again.
     pub fn stop_all(&self, app: &App) {
-        let queued: Vec<u64> = {
+        let queued: Vec<(u64, Job)> = {
             let mut g = lock(&self.inner);
             for stop in g.stops.values() {
                 stop.store(true, Ordering::Relaxed);
             }
-            g.queue.drain(..).map(|(id, _)| id).collect()
+            g.queue.drain(..).collect()
         };
-        for id in queued {
+        for (id, job) in queued {
+            ended(&job, false);
             self.finish(app, id, TransferState::Stopped, None);
         }
     }
@@ -253,10 +258,12 @@ pub fn spawn(app: Arc<App>) {
 async fn run(app: &App, id: u64, job: Job, stop: &AtomicBool) -> Option<Job> {
     let t = &app.transfers;
     if stop.load(Ordering::Relaxed) {
+        ended(&job, false);
         t.finish(app, id, TransferState::Stopped, None);
         return None;
     }
     let Some(remote) = app.remote() else {
+        ended(&job, false);
         t.finish(app, id, TransferState::Failed, Some("not connected".into()));
         return None;
     };
@@ -269,7 +276,7 @@ async fn run(app: &App, id: u64, job: Job, stop: &AtomicBool) -> Option<Job> {
         })
     };
     let result = match &job {
-        Job::Upload { path, dest } => {
+        Job::Upload { path, dest, .. } => {
             blob::upload(&remote, &db, path, dest.clone(), UploadOptions::default(), &progress, stop).await.map(drop)
         }
         Job::Resume { blob } => blob::resume(&remote, &db, blob, 3, &progress, stop).await.map(drop),
@@ -283,18 +290,31 @@ async fn run(app: &App, id: u64, job: Job, stop: &AtomicBool) -> Option<Job> {
             if !matches!(job, Job::Download { .. }) {
                 app.changed_here();
             }
+            ended(&job, true);
             t.finish(app, id, TransferState::Done, None);
         }
         Err(Error::Stopped) => {
             if t.take_cancelled(id) {
                 discard(&remote, &db, &job).await;
             }
+            ended(&job, false);
             t.finish(app, id, TransferState::Stopped, None);
         }
         Err(e) if e.unreachable() => return Some(job),
-        Err(e) => t.finish(app, id, TransferState::Failed, Some(e.to_string())),
+        Err(e) => {
+            ended(&job, false);
+            t.finish(app, id, TransferState::Failed, Some(e.to_string()));
+        }
     }
     None
+}
+
+/// An upload has ended for good (not waiting to be tried again): tell the
+/// batch whose originals it holds, if any.
+fn ended(job: &Job, ok: bool) {
+    if let Job::Upload { path, originals: Some(batch), .. } = job {
+        batch.ended(path, ok);
+    }
 }
 
 /// Delete what a cancelled upload sent. Downloads clean up after themselves.
@@ -359,6 +379,8 @@ struct PlannedFile {
     path: PathBuf,
     name: String,
     size: u64,
+    /// As it was found, for telling later whether it has been edited.
+    stamp: Stamp,
     target: Target,
     taken: Option<Taken>,
 }
@@ -372,7 +394,7 @@ struct Plan {
 }
 
 /// Files that aren't anyone's content: Finder's and Windows' folder litter.
-fn junk(name: &str) -> bool {
+pub fn junk(name: &str) -> bool {
     matches!(name, ".DS_Store" | "Thumbs.db" | "desktop.ini") || name.starts_with("._")
 }
 
@@ -434,7 +456,7 @@ impl Plan {
                 None => None,
             };
             claimed.insert(name.clone());
-            self.files.push(PlannedFile { path: path.to_owned(), name, size: meta.len(), target, taken });
+            self.files.push(PlannedFile { path: path.to_owned(), name, size: meta.len(), stamp: Stamp::of(&meta), target, taken });
         } else {
             // Symlinks, sockets, devices.
             self.skipped += 1;
@@ -443,8 +465,15 @@ impl Plan {
 }
 
 /// Plan an upload of `paths` into `parent` and, unless it must ask first,
-/// make its folders and queue its files.
-pub fn upload(app: &App, paths: Vec<PathBuf>, parent: Option<String>, on_clash: OnClash) -> Result<UploadPlan, CmdError> {
+/// make its folders and queue its files. With `trash_originals`, `paths` go to
+/// the Trash once everything in them is uploaded (originals.rs).
+pub fn upload(
+    app: &App,
+    paths: Vec<PathBuf>,
+    parent: Option<String>,
+    on_clash: OnClash,
+    trash_originals: bool,
+) -> Result<UploadPlan, CmdError> {
     let view = app.view();
     if let Some(p) = &parent
         && !view.get(p).is_some_and(Entry::is_folder)
@@ -469,9 +498,11 @@ pub fn upload(app: &App, paths: Vec<PathBuf>, parent: Option<String>, on_clash: 
     }
 
     let mut skipped = plan.skipped;
-    let mut queued = 0;
     // Names this upload has given out, per folder, for keep-both.
     let mut given: HashMap<Option<String>, HashSet<String>> = HashMap::new();
+    // What will be queued, decided first: the batch has to know all of it
+    // before any upload can end, or a quick one could settle it early.
+    let mut ready: Vec<(PlannedFile, Dest, String)> = Vec::new();
     for f in plan.files {
         let dir = dir_of(&f.target, &made);
         let used = given.entry(dir.clone()).or_default();
@@ -495,8 +526,25 @@ pub fn upload(app: &App, paths: Vec<PathBuf>, parent: Option<String>, on_clash: 
             _ => f.name.clone(),
         };
         used.insert(shown.clone());
-        app.transfers.add(app, Dir::Up, &shown, f.size, Job::Upload { path: f.path, dest });
-        queued += 1;
+        ready.push((f, dest, shown));
+    }
+    let queued = ready.len();
+
+    // Only a batch that uploads something: with nothing queued (all skipped,
+    // say) nothing is trashed, and the UI's "nothing to upload" is the whole story.
+    let batch = (trash_originals && !ready.is_empty()).then(|| {
+        let handle = app.handle.clone();
+        Originals::new(
+            paths,
+            ready.iter().map(|(f, ..)| (f.path.clone(), f.stamp)).collect(),
+            Box::new(originals::to_trash),
+            Box::new(move |outcome| {
+                let _ = handle.emit("originals", outcome);
+            }),
+        )
+    });
+    for (f, dest, shown) in ready {
+        app.transfers.add(app, Dir::Up, &shown, f.size, Job::Upload { path: f.path, dest, originals: batch.clone() });
     }
     if !made.is_empty() {
         app.changed_here();

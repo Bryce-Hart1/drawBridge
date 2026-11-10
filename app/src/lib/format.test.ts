@@ -1,6 +1,6 @@
 // Claude — Date 11/03/2026
 import { describe, expect, it } from 'vitest';
-import { bar, baseMime, duration, fit, hasThumb, human, isLin, isLinName, isText, percent, preview, scrubBar, sizeLabel, splitName, typeLabel, volumeBar, wantsPoster } from './format';
+import { bar, baseMime, duration, fit, hasThumb, human, isLin, isLinName, isText, originalsText, percent, preview, scrubBar, sizeLabel, splitName, typeLabel, volumeBar, wantsPoster } from './format';
 import type { Item } from './types';
 
 const file = (over: Partial<Item>): Item => ({
@@ -101,5 +101,17 @@ describe('format', () => {
     expect(isLinName('a.b.lin')).toBe(true);
     expect(typeLabel(file({ name: 'flow.lin' }))).toBe('lin diagram');
     expect(typeLabel(file({ name: 'a.png', mime: 'image/png' }))).toBe('image/png');
+  });
+
+  it('says what became of the originals, and why any stayed', () => {
+    expect(originalsText({ trashed: ['trip/'], kept: [] })).toBe('moved 1 original to the Trash');
+    expect(originalsText({ trashed: ['a.txt', 'trip/'], kept: [] })).toBe('moved 2 originals to the Trash');
+    expect(originalsText({ trashed: ['a.txt'], kept: [{ name: 'trip/', why: "trip/b.jpg didn't finish uploading" }] })).toBe(
+      "moved 1 original to the Trash · kept trip/: trip/b.jpg didn't finish uploading",
+    );
+    expect(originalsText({ trashed: [], kept: [{ name: 'a.txt', why: 'a.txt changed after it was queued' }] })).toBe(
+      'kept a.txt: a.txt changed after it was queued',
+    );
+    expect(originalsText({ trashed: [], kept: [] })).toBe('nothing to trash');
   });
 });

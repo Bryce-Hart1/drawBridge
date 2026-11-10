@@ -12,7 +12,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import type { CacheInfo, Clash, Hit, Id, Listing, NoteTarget, NoteText, Status, SyncStatus, Transfer, UploadPlan } from './types';
+import type { CacheInfo, Clash, Hit, Id, Listing, NoteTarget, NoteText, OriginalsOutcome, Status, SyncStatus, Transfer, UploadPlan } from './types';
 
 export type Unlisten = () => void;
 
@@ -29,7 +29,11 @@ export interface Backend {
   moveTo(id: Id, parent: Id | null): Promise<void>;
   /** Returns how many entries were deleted: the entry and everything in it. */
   remove(id: Id): Promise<number>;
-  upload(paths: string[], parent: Id | null, onClash: Clash): Promise<UploadPlan>;
+  /**
+   * With `trashOriginals`, `paths` go to the Trash once everything in them is
+   * uploaded, and only then; `onOriginals` says what happened.
+   */
+  upload(paths: string[], parent: Id | null, onClash: Clash, trashOriginals: boolean): Promise<UploadPlan>;
   /** Returns the transfer's id. */
   download(id: Id, path: string): Promise<number>;
   cancel(transfer: number): Promise<void>;
@@ -60,6 +64,7 @@ export interface Backend {
   onIndexChanged(cb: () => void): Promise<Unlisten>;
   onSyncStatus(cb: (s: SyncStatus) => void): Promise<Unlisten>;
   onTransfer(cb: (t: Transfer) => void): Promise<Unlisten>;
+  onOriginals(cb: (o: OriginalsOutcome) => void): Promise<Unlisten>;
   onDragDrop(cb: (e: DropEvent) => void): Promise<Unlisten>;
 }
 
@@ -74,7 +79,7 @@ function tauri(): Backend {
     rename: (id, name) => invoke<void>('rename', { id, name }),
     moveTo: (id, parent) => invoke<void>('move_to', { id, parent }),
     remove: (id) => invoke<number>('remove', { id }),
-    upload: (paths, parent, onClash) => invoke<UploadPlan>('upload', { paths, parent, onClash }),
+    upload: (paths, parent, onClash, trashOriginals) => invoke<UploadPlan>('upload', { paths, parent, onClash, trashOriginals }),
     download: (id, path) => invoke<number>('download', { id, path }),
     cancel: (transfer) => invoke<void>('cancel', { transfer }),
     transfers: () => invoke<Transfer[]>('transfers'),
@@ -107,6 +112,7 @@ function tauri(): Backend {
     onIndexChanged: (cb) => listen('index-changed', () => cb()),
     onSyncStatus: (cb) => listen<SyncStatus>('sync-status', (e) => cb(e.payload)),
     onTransfer: (cb) => listen<Transfer>('transfer', (e) => cb(e.payload)),
+    onOriginals: (cb) => listen<OriginalsOutcome>('originals', (e) => cb(e.payload)),
     onDragDrop: (cb) =>
       getCurrentWebview().onDragDropEvent(({ payload: p }) =>
         cb(p.type === 'enter' || p.type === 'drop' ? { type: p.type, paths: p.paths } : { type: p.type }),
